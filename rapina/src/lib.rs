@@ -15,4 +15,6 @@ pub mod prelude {
 
     pub use http::{Method, StatusCode};
     pub use serde::{Deserialize, Serialize};
+
+    pub use rapina_macros::{delete, get, post, put};
 }

@@ -517,6 +517,11 @@ dependencies = [
 [[package]]
 name = "rapina-macros"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "redox_syscall"
