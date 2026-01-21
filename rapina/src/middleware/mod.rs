@@ -1,3 +1,7 @@
+mod timeout;
+
+pub use timeout::TimeoutMiddleware;
+
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -10,7 +14,7 @@ use crate::response::BoxBody;
 use crate::router::Router;
 use crate::state::AppState;
 
-type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait Middleware: Send + Sync + 'static {
     fn handle<'a>(
