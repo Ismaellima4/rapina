@@ -1,4 +1,5 @@
 pub mod app;
+pub mod context;
 pub mod error;
 pub mod extract;
 pub mod handler;
@@ -9,8 +10,9 @@ pub mod state;
 
 pub mod prelude {
     pub use crate::app::Rapina;
+    pub use crate::context::RequestContext;
     pub use crate::error::{Error, Result};
-    pub use crate::extract::{Json, Path};
+    pub use crate::extract::{Context, Json, Path};
     pub use crate::response::IntoResponse;
     pub use crate::router::Router;
 

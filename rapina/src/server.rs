@@ -1,11 +1,14 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hyper::Request;
+use hyper::body::Incoming;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 
+use crate::context::RequestContext;
 use crate::router::Router;
 use crate::state::AppState;
 
@@ -23,9 +26,14 @@ pub async fn serve(router: Router, state: AppState, addr: SocketAddr) -> std::io
         let state = state.clone();
 
         tokio::spawn(async move {
-            let service = service_fn(move |req| {
+            let service = service_fn(move |mut req: Request<Incoming>| {
                 let router = router.clone();
                 let state = state.clone();
+
+                // Create and inject RequestContext at request start
+                let ctx = RequestContext::new();
+                req.extensions_mut().insert(ctx);
+
                 async move { Ok::<_, std::convert::Infallible>(router.handle(req, &state).await) }
             });
 

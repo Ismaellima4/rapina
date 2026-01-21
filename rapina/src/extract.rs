@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::context::RequestContext;
 use crate::error::Error;
 use crate::response::{BoxBody, IntoResponse};
 use crate::state::AppState;
@@ -14,6 +15,7 @@ use crate::state::AppState;
 pub struct Json<T>(pub T);
 pub struct Path<T>(pub T);
 pub struct State<T>(pub T);
+pub struct Context(pub RequestContext);
 
 pub type PathParams = HashMap<String, String>;
 
@@ -48,6 +50,20 @@ impl<T> Path<T> {
 impl<T> State<T> {
     pub fn into_inner(self) -> T {
         self.0
+    }
+}
+
+impl Context {
+    pub fn into_inner(self) -> RequestContext {
+        self.0
+    }
+
+    pub fn trace_id(&self) -> &str {
+        &self.0.trace_id
+    }
+
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.0.elapsed()
     }
 }
 
@@ -92,6 +108,21 @@ impl<T: Clone + Send + Sync + 'static> FromRequestParts for State<T> {
             .get::<T>()
             .ok_or_else(|| Error::internal("state not found"))?;
         Ok(State(value.clone()))
+    }
+}
+
+impl FromRequestParts for Context {
+    async fn from_request_parts(
+        parts: &http::request::Parts,
+        _params: &PathParams,
+        _state: &Arc<AppState>,
+    ) -> Result<Self, Error> {
+        parts
+            .extensions
+            .get::<RequestContext>()
+            .cloned()
+            .map(Context)
+            .ok_or_else(|| Error::internal("RequestContext not found"))
     }
 }
 

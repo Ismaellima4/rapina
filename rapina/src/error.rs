@@ -25,6 +25,7 @@ pub struct Error {
     pub code: String,
     pub message: String,
     pub details: Option<serde_json::Value>,
+    pub trace_id: Option<String>,
 }
 
 impl Error {
@@ -34,11 +35,17 @@ impl Error {
             code: code.into(),
             message: message.into(),
             details: None,
+            trace_id: None,
         }
     }
 
     pub fn with_details(mut self, details: serde_json::Value) -> Self {
         self.details = Some(details);
+        self
+    }
+
+    pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
+        self.trace_id = Some(trace_id.into());
         self
     }
 
@@ -96,7 +103,11 @@ impl std::error::Error for Error {}
 
 impl IntoResponse for Error {
     fn into_response(self) -> http::Response<BoxBody> {
-        let trace_id = uuid::Uuid::new_v4().to_string();
+        // Use existing trace_id or generate new one as fallback
+        let trace_id = self
+            .trace_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let response = self.to_response(trace_id);
         let body = serde_json::to_vec(&response).unwrap_or_default();
 
