@@ -1,0 +1,51 @@
+name: Question
+description: Ask a question about using Rapina
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have a question about Rapina? Ask away!
+
+        For general Rust questions, consider [Stack Overflow](https://stackoverflow.com/questions/tagged/rust) or the [Rust Users Forum](https://users.rust-lang.org/).
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What would you like to know?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Any relevant context, code, or what you've already tried.
+      render: rust
+
+  - type: dropdown
+    id: topic
+    attributes:
+      label: Topic
+      description: What area is your question about?
+      options:
+        - Getting Started
+        - Extractors (Json, Path, Query, State)
+        - Routing
+        - Middleware
+        - Error Handling
+        - Testing
+        - Deployment
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: docs
+    attributes:
+      label: Documentation
+      options:
+        - label: I've checked the README and existing documentation
+          required: true

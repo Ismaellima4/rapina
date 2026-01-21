@@ -1,0 +1,47 @@
+name: Suggestion
+description: Share an idea or suggestion for improvement
+title: "[Suggestion]: "
+labels: ["suggestion", "discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to make Rapina better? We'd love to hear it!
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggestion
+      description: Describe your suggestion or idea.
+      placeholder: What if Rapina could...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why do you think this would be valuable? Any examples from other frameworks?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: What area does this suggestion relate to?
+      options:
+        - API Design
+        - Documentation
+        - Developer Experience
+        - Performance
+        - Tooling (CLI, macros)
+        - Examples
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: Any code examples, mockups, or references?
+      render: rust
