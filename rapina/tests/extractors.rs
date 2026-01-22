@@ -280,6 +280,7 @@ async fn test_custom_header() {
 // Form Extractor Tests
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct LoginForm {
     username: String,
     password: String,
