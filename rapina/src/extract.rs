@@ -15,6 +15,7 @@ use crate::state::AppState;
 pub struct Json<T>(pub T);
 pub struct Path<T>(pub T);
 pub struct Query<T>(pub T);
+pub struct Headers(pub http::HeaderMap);
 pub struct State<T>(pub T);
 pub struct Context(pub RequestContext);
 
@@ -50,6 +51,16 @@ impl<T> Path<T> {
 
 impl<T> Query<T> {
     pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl Headers {
+    pub fn get(&self, key: &str) -> Option<&http::HeaderValue> {
+        self.0.get(key)
+    }
+
+    pub fn into_inner(self) -> http::HeaderMap {
         self.0
     }
 }
@@ -143,6 +154,16 @@ impl<T: DeserializeOwned + Send> FromRequestParts for Query<T> {
         let value: T = serde_urlencoded::from_str(query)
             .map_err(|e| Error::bad_request(format!("invalid query: {}", e)))?;
         Ok(Query(value))
+    }
+}
+
+impl FromRequestParts for Headers {
+    async fn from_request_parts(
+        parts: &http::request::Parts,
+        _params: &PathParams,
+        _state: &Arc<AppState>,
+    ) -> Result<Self, Error> {
+        Ok(Headers(parts.headers.clone()))
     }
 }
 
