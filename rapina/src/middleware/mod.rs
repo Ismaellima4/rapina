@@ -194,6 +194,6 @@ mod tests {
 
     #[test]
     fn test_trace_id_middleware_default() {
-        let _mw = TraceIdMiddleware::default();
+        let _mw: TraceIdMiddleware = Default::default();
     }
 }

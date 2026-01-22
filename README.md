@@ -1,8 +1,22 @@
 # Rapina 🦅
 
+[![Crates.io](https://img.shields.io/crates/v/rapina.svg)](https://crates.io/crates/rapina)
+[![Documentation](https://docs.rs/rapina/badge.svg)](https://docs.rs/rapina)
+[![CI](https://github.com/arferreira/rapina/actions/workflows/ci.yml/badge.svg)](https://github.com/arferreira/rapina/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 > Predictable, auditable, and secure APIs — written by humans, accelerated by AI.
 
 Rapina is a web framework for Rust inspired by FastAPI, focused on **productivity**, **type safety**, and **clear conventions**.
+
+## Installation
+
+Add Rapina to your `Cargo.toml`:
+
+```toml
+[dependencies]
+rapina = "0.1"
+```
 
 ## Why Rapina?
 
@@ -83,6 +97,28 @@ async fn get_user(id: Path<u64>) -> Json<User> { ... }
 
 #[post("/users")]
 async fn create_user(body: Json<CreateUser>) -> Json<User> { ... }
+
+#[get("/search")]
+async fn search(query: Query<SearchParams>) -> Json<Results> { ... }
+
+#[post("/login")]
+async fn login(form: Form<LoginData>) -> Json<Token> { ... }
+```
+
+Available extractors: `Json`, `Path`, `Query`, `Form`, `Headers`, `State`, `Context`
+
+### Middleware
+
+```rust
+use rapina::middleware::{TimeoutMiddleware, BodyLimitMiddleware, TraceIdMiddleware};
+
+Rapina::new()
+    .middleware(TraceIdMiddleware::new())
+    .middleware(TimeoutMiddleware::new(Duration::from_secs(30)))
+    .middleware(BodyLimitMiddleware::new(1024 * 1024)) // 1MB
+    .router(router)
+    .listen("127.0.0.1:3000")
+    .await
 ```
 
 ### Standardized Errors
@@ -108,14 +144,35 @@ Every error returns a consistent envelope with `trace_id`:
 #[delete("/path")]
 ```
 
+### Application State
+
+```rust
+#[derive(Clone)]
+struct AppConfig {
+    db_url: String,
+}
+
+#[get("/config")]
+async fn get_config(state: State<AppConfig>) -> String {
+    state.into_inner().db_url
+}
+
+Rapina::new()
+    .state(AppConfig { db_url: "postgres://...".to_string() })
+    .router(router)
+    .listen("127.0.0.1:3000")
+    .await
+```
+
 ## Roadmap
 
 - [x] Basic router
-- [x] Extractors (`Json`, `Path`)
-- [x] Proc macros (`#[get]`, `#[post]`, etc.)
-- [x] Standardized error handling
-- [ ] Query extractor
-- [ ] Dependency Injection / State
+- [x] Extractors (`Json`, `Path`, `Query`, `Form`, `Headers`, `State`, `Context`)
+- [x] Proc macros (`#[get]`, `#[post]`, `#[put]`, `#[delete]`)
+- [x] Standardized error handling with `trace_id`
+- [x] Middleware system (`Timeout`, `BodyLimit`, `TraceId`)
+- [x] Dependency Injection / State
+- [x] Request context with tracing
 - [ ] Auth (Bearer JWT, `CurrentUser`)
 - [ ] Observability (tracing, structured logs)
 - [ ] Validation (`Validated<T>`)
