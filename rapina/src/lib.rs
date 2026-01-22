@@ -64,12 +64,19 @@
 //! - [`BodyLimitMiddleware`](middleware::BodyLimitMiddleware) - Limit request body size
 //! - [`TraceIdMiddleware`](middleware::TraceIdMiddleware) - Add trace IDs to requests
 //! - [`RequestLogMiddleware`](middleware::RequestLogMiddleware) - Structured request logging
+//!
+//! ## Introspection
+//!
+//! Access route metadata for documentation and tooling:
+//!
+//! - [`RouteInfo`](introspection::RouteInfo) - Metadata about registered routes
 
 pub mod app;
 pub mod context;
 pub mod error;
 pub mod extract;
 pub mod handler;
+pub mod introspection;
 pub mod middleware;
 pub mod observability;
 pub mod response;
@@ -91,6 +98,7 @@ pub mod prelude {
     pub use crate::context::RequestContext;
     pub use crate::error::{Error, Result};
     pub use crate::extract::{Context, Form, Headers, Json, Path, Query, Validated};
+    pub use crate::introspection::RouteInfo;
     pub use crate::middleware::{Middleware, Next};
     pub use crate::observability::TracingConfig;
     pub use crate::response::IntoResponse;

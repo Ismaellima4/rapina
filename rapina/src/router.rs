@@ -11,6 +11,7 @@ use http::{Method, Request, Response, StatusCode};
 use hyper::body::Incoming;
 
 use crate::extract::{PathParams, extract_path_params};
+use crate::introspection::RouteInfo;
 use crate::response::{BoxBody, IntoResponse};
 use crate::state::AppState;
 
@@ -20,6 +21,7 @@ type HandlerFn =
 
 pub(crate) struct Route {
     pub(crate) pattern: String,
+    pub(crate) handler_name: String,
     handler: HandlerFn,
 }
 
@@ -48,8 +50,16 @@ impl Router {
         Self { routes: Vec::new() }
     }
 
-    /// Adds a route with the given HTTP method and pattern.
-    pub fn route<F, Fut, Out>(mut self, method: Method, pattern: &str, handler: F) -> Self
+    /// Adds a route with the given HTTP method, pattern, and handler name.
+    ///
+    /// The handler name is used for route introspection and documentation.
+    pub fn route_named<F, Fut, Out>(
+        mut self,
+        method: Method,
+        pattern: &str,
+        handler_name: &str,
+        handler: F,
+    ) -> Self
     where
         F: Fn(Request<Incoming>, PathParams, Arc<AppState>) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = Out> + Send + 'static,
@@ -67,11 +77,35 @@ impl Router {
 
         let route = Route {
             pattern: pattern.to_string(),
+            handler_name: handler_name.to_string(),
             handler,
         };
 
         self.routes.push((method, route));
         self
+    }
+
+    /// Adds a route with the given HTTP method and pattern.
+    ///
+    /// The handler name defaults to "handler". Use [`route_named`](Self::route_named)
+    /// to specify a custom handler name for introspection.
+    pub fn route<F, Fut, Out>(self, method: Method, pattern: &str, handler: F) -> Self
+    where
+        F: Fn(Request<Incoming>, PathParams, Arc<AppState>) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Out> + Send + 'static,
+        Out: IntoResponse + 'static,
+    {
+        self.route_named(method, pattern, "handler", handler)
+    }
+
+    /// Adds a GET route with a handler name.
+    pub fn get_named<F, Fut, Out>(self, pattern: &str, handler_name: &str, handler: F) -> Self
+    where
+        F: Fn(Request<Incoming>, PathParams, Arc<AppState>) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Out> + Send + 'static,
+        Out: IntoResponse + 'static,
+    {
+        self.route_named(Method::GET, pattern, handler_name, handler)
     }
 
     /// Adds a GET route.
@@ -84,6 +118,16 @@ impl Router {
         self.route(Method::GET, pattern, handler)
     }
 
+    /// Adds a POST route with a handler name.
+    pub fn post_named<F, Fut, Out>(self, pattern: &str, handler_name: &str, handler: F) -> Self
+    where
+        F: Fn(Request<Incoming>, PathParams, Arc<AppState>) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future<Output = Out> + Send + 'static,
+        Out: IntoResponse + 'static,
+    {
+        self.route_named(Method::POST, pattern, handler_name, handler)
+    }
+
     /// Adds a POST route.
     pub fn post<F, Fut, Out>(self, pattern: &str, handler: F) -> Self
     where
@@ -92,6 +136,35 @@ impl Router {
         Out: IntoResponse + 'static,
     {
         self.route(Method::POST, pattern, handler)
+    }
+
+    /// Returns metadata about all registered routes.
+    ///
+    /// This is useful for introspection, documentation generation,
+    /// and AI-native tooling integration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rapina::prelude::*;
+    ///
+    /// let router = Router::new()
+    ///     .get_named("/users", "list_users", |_, _, _| async { "users" })
+    ///     .post_named("/users", "create_user", |_, _, _| async { StatusCode::CREATED });
+    ///
+    /// let routes = router.routes();
+    /// assert_eq!(routes.len(), 2);
+    /// assert_eq!(routes[0].method, "GET");
+    /// assert_eq!(routes[0].path, "/users");
+    /// assert_eq!(routes[0].handler_name, "list_users");
+    /// ```
+    pub fn routes(&self) -> Vec<RouteInfo> {
+        self.routes
+            .iter()
+            .map(|(method, route)| {
+                RouteInfo::new(method.as_str(), &route.pattern, &route.handler_name)
+            })
+            .collect()
     }
 
     /// Handles an incoming request by matching it to a route.
@@ -202,5 +275,93 @@ mod tests {
         assert_eq!(router.routes[0].1.pattern, "/first");
         assert_eq!(router.routes[1].1.pattern, "/second");
         assert_eq!(router.routes[2].1.pattern, "/third");
+    }
+
+    #[test]
+    fn test_router_routes_introspection() {
+        let router = Router::new()
+            .get_named("/users", "list_users", |_req, _params, _state| async {
+                StatusCode::OK
+            })
+            .post_named("/users", "create_user", |_req, _params, _state| async {
+                StatusCode::CREATED
+            });
+
+        let routes = router.routes();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].method, "GET");
+        assert_eq!(routes[0].path, "/users");
+        assert_eq!(routes[0].handler_name, "list_users");
+        assert_eq!(routes[1].method, "POST");
+        assert_eq!(routes[1].path, "/users");
+        assert_eq!(routes[1].handler_name, "create_user");
+    }
+
+    #[test]
+    fn test_router_routes_default_handler_name() {
+        let router = Router::new().get("/health", |_req, _params, _state| async { StatusCode::OK });
+
+        let routes = router.routes();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].handler_name, "handler");
+    }
+
+    #[test]
+    fn test_router_route_named() {
+        let router = Router::new().route_named(
+            Method::PUT,
+            "/users/:id",
+            "update_user",
+            |_req, _params, _state| async { StatusCode::OK },
+        );
+
+        let routes = router.routes();
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].method, "PUT");
+        assert_eq!(routes[0].path, "/users/:id");
+        assert_eq!(routes[0].handler_name, "update_user");
+    }
+
+    #[test]
+    fn test_router_get_named() {
+        let router =
+            Router::new().get_named("/items", "list_items", |_req, _params, _state| async {
+                StatusCode::OK
+            });
+
+        let routes = router.routes();
+        assert_eq!(routes[0].method, "GET");
+        assert_eq!(routes[0].handler_name, "list_items");
+    }
+
+    #[test]
+    fn test_router_post_named() {
+        let router =
+            Router::new().post_named("/items", "create_item", |_req, _params, _state| async {
+                StatusCode::CREATED
+            });
+
+        let routes = router.routes();
+        assert_eq!(routes[0].method, "POST");
+        assert_eq!(routes[0].handler_name, "create_item");
+    }
+
+    #[test]
+    fn test_router_routes_empty() {
+        let router = Router::new();
+        assert!(router.routes().is_empty());
+    }
+
+    #[test]
+    fn test_router_routes_mixed_named_and_default() {
+        let router = Router::new()
+            .get_named("/named", "named_handler", |_req, _params, _state| async {
+                StatusCode::OK
+            })
+            .get("/default", |_req, _params, _state| async { StatusCode::OK });
+
+        let routes = router.routes();
+        assert_eq!(routes[0].handler_name, "named_handler");
+        assert_eq!(routes[1].handler_name, "handler");
     }
 }
