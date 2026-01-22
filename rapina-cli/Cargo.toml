@@ -1,0 +1,17 @@
+[package]
+name = "rapina-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI tool for Rapina web framework"
+license = "MIT"
+repository = "https://github.com/arferreira/rapina"
+keywords = ["web", "framework", "cli", "rapina"]
+categories = ["command-line-utilities", "web-programming"]
+
+[[bin]]
+name = "rapina"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+colored = "3"

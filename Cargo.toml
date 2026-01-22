@@ -1,4 +1,4 @@
 [workspace]
-members = ["rapina", "rapina-macros"]
+members = ["rapina", "rapina-macros", "rapina-cli"]
 
 resolver = "2"
