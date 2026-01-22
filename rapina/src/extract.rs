@@ -15,6 +15,7 @@ use crate::state::AppState;
 pub struct Json<T>(pub T);
 pub struct Path<T>(pub T);
 pub struct Query<T>(pub T);
+pub struct Form<T>(pub T);
 pub struct Headers(pub http::HeaderMap);
 pub struct State<T>(pub T);
 pub struct Context(pub RequestContext);
@@ -50,6 +51,12 @@ impl<T> Path<T> {
 }
 
 impl<T> Query<T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T> Form<T> {
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -113,6 +120,40 @@ impl<T: serde::Serialize> IntoResponse for Json<T> {
             .header("content-type", "application/json")
             .body(http_body_util::Full::new(Bytes::from(body)))
             .unwrap()
+    }
+}
+
+impl<T: DeserializeOwned + Send> FromRequest for Form<T> {
+    async fn from_request(
+        req: Request<Incoming>,
+        _params: &PathParams,
+        _state: &Arc<AppState>,
+    ) -> Result<Self, Error> {
+        let content_type = req
+            .headers()
+            .get(http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok());
+
+        if !content_type
+            .map(|ct| ct.starts_with("application/x-www-form-urlencoded"))
+            .unwrap_or(false)
+        {
+            return Err(Error::bad_request(
+                "expected content-type: application/x-www-form-urlencoded",
+            ));
+        }
+
+        let body = req.into_body();
+        let bytes = body
+            .collect()
+            .await
+            .map_err(|_| Error::bad_request("failed to read body"))?
+            .to_bytes();
+
+        let value: T = serde_urlencoded::from_bytes(&bytes)
+            .map_err(|e| Error::bad_request(format!("invalid form data: {}", e)))?;
+
+        Ok(Form(value))
     }
 }
 

@@ -13,7 +13,7 @@ pub mod prelude {
     pub use crate::app::Rapina;
     pub use crate::context::RequestContext;
     pub use crate::error::{Error, Result};
-    pub use crate::extract::{Context, Headers, Json, Path, Query};
+    pub use crate::extract::{Context, Form, Headers, Json, Path, Query};
     pub use crate::middleware::{Middleware, Next};
     pub use crate::response::IntoResponse;
     pub use crate::router::Router;
