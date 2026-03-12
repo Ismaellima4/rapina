@@ -21,13 +21,14 @@ use crate::state::AppState;
 pub(crate) type ShutdownHook = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
 
 pub(crate) async fn serve(
-    router: Router,
+    mut router: Router,
     state: AppState,
     middlewares: MiddlewareStack,
     addr: SocketAddr,
     shutdown_timeout: Duration,
     shutdown_hooks: Vec<ShutdownHook>,
 ) -> std::io::Result<()> {
+    router.freeze();
     let router = Arc::new(router);
     let state = Arc::new(state);
     let middlewares = Arc::new(middlewares);
@@ -162,11 +163,11 @@ mod tests {
 
     #[cfg(windows)]
     mod windows_tests {
-        use windows::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
+        use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, GenerateConsoleCtrlEvent};
 
         pub(super) fn send_ctrl_break() {
             unsafe {
-                GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0).unwrap();
+                GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
             }
         }
     }
