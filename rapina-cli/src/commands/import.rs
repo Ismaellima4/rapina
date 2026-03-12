@@ -98,8 +98,7 @@ fn map_mysql_type(col_type: &sea_schema::mysql::def::Type) -> NormalizedType {
         Type::Date => NormalizedType::Date,
         Type::Decimal(_) => NormalizedType::Decimal,
         Type::Json => NormalizedType::Json,
-        Type::Binary(_) => NormalizedType::Uuid,
-        Type::Varbinary(_) => NormalizedType::Uuid,
+        Type::Binary(s) if s.length == Some(16) => NormalizedType::Uuid,
         other => NormalizedType::Unmappable(format!("{:?}", other)),
     }
 }
@@ -123,8 +122,6 @@ fn map_sqlite_type(col_type: &sea_schema::sea_query::ColumnType) -> NormalizedTy
         ColumnType::Date => NormalizedType::Date,
         ColumnType::Decimal(_) | ColumnType::Money(_) => NormalizedType::Decimal,
         ColumnType::Json | ColumnType::JsonBinary => NormalizedType::Json,
-        ColumnType::Binary(_) | ColumnType::Blob => NormalizedType::Uuid,
-        ColumnType::Custom(custom) if custom.to_string().contains("UUID") => NormalizedType::Uuid,
         other => NormalizedType::Unmappable(format!("{:?}", other)),
     }
 }
@@ -703,7 +700,7 @@ pub fn database(
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(all(test, feature = "import-postgres"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1091,5 +1088,22 @@ mod tests {
         use sea_schema::sea_query::ColumnType;
         assert_eq!(map_sqlite_type(&ColumnType::Uuid), NormalizedType::Uuid);
         assert_eq!(map_sqlite_type(&ColumnType::Integer), NormalizedType::I32);
+    }
+
+    #[cfg(feature = "import-mysql")]
+    #[test]
+    fn test_map_mysql_type_special() {
+        use sea_schema::mysql::def::{NumericAttr, StringAttr, Type};
+        assert_eq!(
+            map_mysql_type(&Type::Binary(StringAttr {
+                length: Some(16),
+                ..Default::default()
+            })),
+            NormalizedType::Uuid
+        );
+        assert_eq!(
+            map_mysql_type(&Type::Int(NumericAttr::default())),
+            NormalizedType::I32
+        );
     }
 }

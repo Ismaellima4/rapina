@@ -94,10 +94,17 @@ pub(crate) fn generate_handlers(
         .collect();
     let update_body = update_checks.join("\n");
 
+    let uuid_import = if pk_type.to_lowercase().as_str() == "uuid" {
+        "use rapina::uuid::Uuid;"
+    } else {
+        ""
+    };
+
     format!(
         r#"use rapina::prelude::*;
 use rapina::database::{{Db, DbError}};
 use rapina::sea_orm::{{ActiveModelTrait, EntityTrait, IntoActiveModel, Set}};
+{uuid_import}
 
 use crate::entity::{pascal};
 use crate::entity::{singular}::{{ActiveModel, Model}};
@@ -174,6 +181,7 @@ pub async fn delete_{singular}(db: Db, id: Path<{pk_type}>) -> Result<Json<serde
         create_body = create_body,
         update_body = update_body,
         pk_type = pk_type,
+        uuid_import = uuid_import,
     )
 }
 
@@ -281,17 +289,18 @@ pub(crate) fn generate_schema_block(
     let mut attrs = String::new();
 
     if let Some(pk_cols) = primary_key {
-        attrs.push_str(&format!("\n    #[primary_key({})]\n", pk_cols.join(", ")));
+        attrs.push_str(&format!("\n    #[primary_key({})]", pk_cols.join(", ")));
     }
 
     if let Some(ts) = timestamps {
-        attrs.push_str(&format!("\n    #[timestamps({})]\n", ts));
+        attrs.push_str(&format!("\n    #[timestamps({})]", ts));
     }
 
     format!(
         r#"
 schema! {{
-    {pascal} {{{attrs}
+    {attrs}
+    {pascal} {{
 {fields}
     }}
 }}
@@ -330,6 +339,23 @@ pub(crate) fn generate_migration(
 
     let readable_name = format!("create {}", plural);
 
+    let col = match pk_type.to_lowercase().as_str() {
+        "uuid" => format!("ColumnDef::new({pascal_plural}::Id).uuid().not_null().primary_key()"),
+        "i32" | "integer" => {
+            format!(
+                "ColumnDef::new({pascal_plural}::Id).integer().not_null().auto_increment().primary_key()"
+            )
+        }
+        "i64" | "bigint" => {
+            format!(
+                "ColumnDef::new({pascal_plural}::Id).big_integer().not_null().auto_increment().primary_key()"
+            )
+        }
+        _ => format!(
+            r#"ColumnDef::new({pascal_plural}::Id).type_iden(rapina::migration::Alias::new("{pk_type}")).not_null().primary_key()"#
+        ),
+    };
+
     format!(
         r#"//! Migration: {readable_name}
 
@@ -346,16 +372,7 @@ impl MigrationTrait for Migration {{
             .create_table(
                 Table::create()
                     .table({pascal_plural}::Table)
-                    .col({{
-                        let mut col = ColumnDef::new({pascal_plural}::Id);
-                        match "{pk_type}".to_lowercase().as_str() {{
-                            "uuid" => col.uuid(),
-                            "i32" | "integer" => col.integer(),
-                            "i64" | "bigint" => col.big_integer(),
-                            _ => col.type_iden(rapina::migration::Alias::new("{pk_type}")),
-                        }};
-                        col.not_null().primary_key().to_owned()
-                    }})
+                    .col({col})
 {column_defs}
                     .to_owned(),
             )
@@ -380,7 +397,6 @@ enum {pascal_plural} {{
         pascal_plural = pascal_plural,
         column_defs = column_defs.join("\n"),
         iden_variants = iden_variants.join("\n"),
-        pk_type = pk_type,
     )
 }
 
