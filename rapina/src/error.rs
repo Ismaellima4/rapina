@@ -27,27 +27,42 @@
 
 use serde::Serialize;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::response::{APPLICATION_JSON, APPLICATION_PROBLEM_JSON, BoxBody, IntoResponse};
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
 use http_body_util::Full;
 
-static USE_RFC7807: AtomicBool = AtomicBool::new(false);
-
-/// Sets whether to use RFC 7807 Problem Details for error responses.
+/// Configuration for error response format.
 ///
-/// When enabled (default), error responses use the `application/problem+json`
-/// content type and follow the RFC 7807 structure. When disabled, the
-/// legacy JSON structure and `application/json` content type are used.
-pub fn set_rfc7807_error_format(enabled: bool) {
-    USE_RFC7807.store(enabled, Ordering::SeqCst);
+/// Store this in [`AppState`](crate::state::AppState) to control whether
+/// errors use RFC 7807 Problem Details or the standard JSON format.
+/// Each request's task inherits the setting via a `tokio::task_local`,
+/// so tests run in parallel without interference.
+#[derive(Debug, Clone)]
+pub struct ErrorConfig {
+    /// When `true`, error responses use `application/problem+json`.
+    pub use_rfc7807: bool,
+    /// Base URI for RFC 7807 `type` field (e.g. `"https://myapp.com/errors"`).
+    ///
+    /// Error codes are appended as path segments:
+    /// `NOT_FOUND` → `{base_uri}/not-found`.
+    ///
+    /// Defaults to `"about:blank"` per RFC 7807 §4.2 when not configured.
+    pub base_uri: String,
 }
 
-/// Returns whether RFC 7807 error format is currently enabled.
-pub fn is_rfc7807_enabled() -> bool {
-    USE_RFC7807.load(Ordering::SeqCst)
+impl Default for ErrorConfig {
+    fn default() -> Self {
+        Self {
+            use_rfc7807: false,
+            base_uri: "about:blank".to_string(),
+        }
+    }
+}
+
+tokio::task_local! {
+    pub(crate) static ERROR_CONFIG: ErrorConfig;
 }
 
 /// Standard error response format.
@@ -102,12 +117,13 @@ pub mod rfc7807 {
         pub extensions: Option<serde_json::Value>,
     }
 
-    const BASE_ERROR_URI: &str = "https://userapina.com/errors";
-
-    pub(crate) fn get_error_type_uri(code: &str) -> String {
+    pub(crate) fn get_error_type_uri(base_uri: &str, code: &str) -> String {
+        if base_uri == "about:blank" {
+            return base_uri.to_string();
+        }
         format!(
             "{}/{}",
-            BASE_ERROR_URI,
+            base_uri.trim_end_matches('/'),
             code.to_lowercase().replace('_', "-")
         )
     }
@@ -260,10 +276,10 @@ impl Error {
         Self::new(500, "INTERNAL_ERROR", message)
     }
 
-    /// Converts this error to a ProblemDetails response with the given trace ID.
-    pub fn to_rfc7807_response(&self, trace_id: String) -> rfc7807::ProblemDetails {
+    /// Converts this error to a ProblemDetails response with the given trace ID and base URI.
+    pub fn to_rfc7807_response(&self, trace_id: String, base_uri: &str) -> rfc7807::ProblemDetails {
         rfc7807::ProblemDetails {
-            type_uri: rfc7807::get_error_type_uri(&self.0.code),
+            type_uri: rfc7807::get_error_type_uri(base_uri, &self.0.code),
             title: rfc7807::get_error_title(&self.0.code),
             status: self.0.status,
             detail: self.0.message.clone(),
@@ -396,8 +412,10 @@ impl IntoResponse for Error {
             .clone()
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-        if is_rfc7807_enabled() {
-            let response = self.to_rfc7807_response(trace_id);
+        let config = ERROR_CONFIG.try_with(|c| c.clone()).unwrap_or_default();
+
+        if config.use_rfc7807 {
+            let response = self.to_rfc7807_response(trace_id, &config.base_uri);
             let body = serde_json::to_vec(&response).unwrap_or_default();
 
             http::Response::builder()
@@ -434,7 +452,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 mod tests {
     use super::*;
     use http_body_util::BodyExt;
-    use serial_test::serial;
 
     // Test domain error for the trait tests
     #[derive(Debug)]
@@ -601,76 +618,90 @@ mod tests {
     #[test]
     fn test_error_to_rfc7807_response() {
         let err = Error::not_found("user not found");
-        let response = err.to_rfc7807_response("trace-abc".to_string());
+        let response = err.to_rfc7807_response("trace-abc".to_string(), "https://myapp.com/errors");
         assert_eq!(response.trace_id, "trace-abc");
-        assert_eq!(response.type_uri, "https://userapina.com/errors/not-found");
+        assert_eq!(response.type_uri, "https://myapp.com/errors/not-found");
         assert_eq!(response.title, "Not Found");
         assert_eq!(response.detail, "user not found");
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_error_into_rfc7807_response() {
-        set_rfc7807_error_format(true);
-        let err = Error::bad_request("test error").with_trace_id("my-trace");
-        let response = err.into_response();
+        let config = ErrorConfig {
+            use_rfc7807: true,
+            base_uri: "https://myapp.com/errors".to_string(),
+        };
+        ERROR_CONFIG
+            .scope(config, async {
+                let err = Error::bad_request("test error").with_trace_id("my-trace");
+                let response = err.into_response();
 
-        assert_eq!(response.status(), 400);
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "application/problem+json"
-        );
+                assert_eq!(response.status(), 400);
+                assert_eq!(
+                    response.headers().get("content-type").unwrap(),
+                    "application/problem+json"
+                );
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["type"], "https://userapina.com/errors/bad-request");
-        assert_eq!(json["title"], "Bad Request");
-        assert_eq!(json["status"], 400);
-        assert_eq!(json["detail"], "test error");
-        assert_eq!(json["trace_id"], "my-trace");
+                assert_eq!(json["type"], "https://myapp.com/errors/bad-request");
+                assert_eq!(json["title"], "Bad Request");
+                assert_eq!(json["status"], 400);
+                assert_eq!(json["detail"], "test error");
+                assert_eq!(json["trace_id"], "my-trace");
+            })
+            .await;
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_error_into_standard_response() {
-        set_rfc7807_error_format(false);
-        let err = Error::bad_request("test error").with_trace_id("my-trace");
-        let response = err.into_response();
+        ERROR_CONFIG
+            .scope(ErrorConfig::default(), async {
+                let err = Error::bad_request("test error").with_trace_id("my-trace");
+                let response = err.into_response();
 
-        assert_eq!(response.status(), 400);
-        assert_eq!(
-            response.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+                assert_eq!(response.status(), 400);
+                assert_eq!(
+                    response.headers().get("content-type").unwrap(),
+                    "application/json"
+                );
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(json["error"]["code"], "BAD_REQUEST");
-        assert_eq!(json["error"]["message"], "test error");
-        assert_eq!(json["trace_id"], "my-trace");
+                assert_eq!(json["error"]["code"], "BAD_REQUEST");
+                assert_eq!(json["error"]["message"], "test error");
+                assert_eq!(json["trace_id"], "my-trace");
+            })
+            .await;
     }
 
     #[tokio::test]
-    #[serial]
     async fn test_error_into_response_generates_trace_id() {
-        set_rfc7807_error_format(true);
-        let err = Error::internal("error");
-        let response = err.into_response();
+        let config = ErrorConfig {
+            use_rfc7807: true,
+            base_uri: "https://myapp.com/errors".to_string(),
+        };
+        ERROR_CONFIG
+            .scope(config, async {
+                let err = Error::internal("error");
+                let response = err.into_response();
 
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let body = response.into_body().collect().await.unwrap().to_bytes();
+                let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-        // Should have a generated UUID trace_id
-        let trace_id = json["trace_id"].as_str().unwrap();
-        assert_eq!(trace_id.len(), 36); // UUID format
+                // Should have a generated UUID trace_id
+                let trace_id = json["trace_id"].as_str().unwrap();
+                assert_eq!(trace_id.len(), 36); // UUID format
+            })
+            .await;
     }
 
     #[test]
     fn test_error_response_skips_none_details() {
         let err = Error::bad_request("test");
-        let response = err.to_rfc7807_response("trace".to_string());
+        let response = err.to_rfc7807_response("trace".to_string(), "https://myapp.com/errors");
         let json = serde_json::to_string(&response).unwrap();
         // extensions is flattened, so if None it should not be present
         assert!(!json.contains("extensions"));
@@ -683,7 +714,7 @@ mod tests {
     fn test_error_response_includes_details() {
         let details = serde_json::json!({"field": "email"});
         let err = Error::bad_request("test").with_details(details);
-        let response = err.to_rfc7807_response("trace".to_string());
+        let response = err.to_rfc7807_response("trace".to_string(), "https://myapp.com/errors");
         let json = serde_json::to_string(&response).unwrap();
         // flattened extensions
         assert!(json.contains("\"field\":\"email\""));
@@ -713,12 +744,28 @@ mod tests {
     #[test]
     fn test_get_error_type_uri() {
         assert_eq!(
-            rfc7807::get_error_type_uri("NOT_FOUND"),
-            "https://userapina.com/errors/not-found"
+            rfc7807::get_error_type_uri("https://myapp.com/errors", "NOT_FOUND"),
+            "https://myapp.com/errors/not-found"
         );
         assert_eq!(
-            rfc7807::get_error_type_uri("BAD_REQUEST"),
-            "https://userapina.com/errors/bad-request"
+            rfc7807::get_error_type_uri("https://myapp.com/errors", "BAD_REQUEST"),
+            "https://myapp.com/errors/bad-request"
+        );
+    }
+
+    #[test]
+    fn test_get_error_type_uri_about_blank() {
+        assert_eq!(
+            rfc7807::get_error_type_uri("about:blank", "NOT_FOUND"),
+            "about:blank"
+        );
+    }
+
+    #[test]
+    fn test_get_error_type_uri_trailing_slash() {
+        assert_eq!(
+            rfc7807::get_error_type_uri("https://myapp.com/errors/", "NOT_FOUND"),
+            "https://myapp.com/errors/not-found"
         );
     }
 

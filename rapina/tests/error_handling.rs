@@ -3,14 +3,13 @@
 use http::StatusCode;
 use rapina::prelude::*;
 use rapina::testing::TestClient;
-use serial_test::serial;
 
 #[tokio::test]
-#[serial]
 async fn test_error_400_bad_request() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/bad", |_, _, _| async {
                 Error::bad_request("invalid input")
@@ -30,11 +29,11 @@ async fn test_error_400_bad_request() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_401_unauthorized() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/protected", |_, _, _| async {
                 Error::unauthorized("authentication required")
@@ -53,11 +52,11 @@ async fn test_error_401_unauthorized() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_403_forbidden() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/admin", |_, _, _| async {
                 Error::forbidden("access denied")
@@ -76,11 +75,11 @@ async fn test_error_403_forbidden() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_404_not_found() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/users/:id", |_, _, _| async {
                 Error::not_found("user not found")
@@ -99,11 +98,11 @@ async fn test_error_404_not_found() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_409_conflict() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::POST, "/users", |_, _, _| async {
                 Error::conflict("user already exists")
@@ -122,11 +121,11 @@ async fn test_error_409_conflict() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_422_validation() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::POST, "/users", |_, _, _| async {
                 Error::validation("validation failed")
@@ -148,11 +147,11 @@ async fn test_error_422_validation() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_429_rate_limited() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/api", |_, _, _| async {
                 Error::rate_limited("too many requests")
@@ -171,11 +170,11 @@ async fn test_error_429_rate_limited() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_500_internal() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/crash", |_, _, _| async {
                 Error::internal("something went wrong")
@@ -194,11 +193,11 @@ async fn test_error_500_internal() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_with_details() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::POST, "/users", |_, _, _| async {
                 Error::validation("validation failed").with_details(serde_json::json!({
@@ -229,11 +228,11 @@ async fn test_error_with_details() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_with_custom_trace_id() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/error", |_, _, _| async {
                 Error::bad_request("test error").with_trace_id("custom-trace-123")
@@ -250,11 +249,11 @@ async fn test_error_with_custom_trace_id() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_trace_id_is_uuid_by_default() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/error", |_, _, _| async {
                 Error::bad_request("test error")
@@ -273,11 +272,11 @@ async fn test_error_trace_id_is_uuid_by_default() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_response_content_type() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/error", |_, _, _| async {
                 Error::bad_request("test")
@@ -297,11 +296,11 @@ async fn test_error_response_content_type() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_result_ok_returns_success() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/result", |_, _, _| async {
                 let result: std::result::Result<&str, Error> = Ok("success");
@@ -317,11 +316,11 @@ async fn test_result_ok_returns_success() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_result_err_returns_error() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/result", |_, _, _| async {
                 let result: std::result::Result<&str, Error> = Err(Error::not_found("not found"));
@@ -336,11 +335,11 @@ async fn test_result_err_returns_error() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_custom_error_status() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/custom", |_, _, _| async {
                 Error::new(418, "IM_A_TEAPOT", "I'm a teapot")
@@ -359,11 +358,11 @@ async fn test_custom_error_status() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_without_details_omits_field() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::GET, "/error", |_, _, _| async {
                 Error::bad_request("simple error")
@@ -380,11 +379,11 @@ async fn test_error_without_details_omits_field() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_error_chaining() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .router(
             Router::new().route(http::Method::POST, "/users", |_, _, _| async {
                 Error::validation("invalid input")
@@ -409,7 +408,6 @@ async fn test_error_chaining() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_router_404_response() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -423,7 +421,6 @@ async fn test_router_404_response() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_standard_error_format() {
     let app = Rapina::new()
         .with_introspection(false)

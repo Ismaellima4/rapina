@@ -72,8 +72,10 @@ pub struct Rapina {
     /// Relay configuration (if enabled)
     #[cfg(feature = "websocket")]
     pub(crate) relay_config: Option<crate::relay::RelayConfig>,
-    /// Whether to use RFC 7807 Problem Details for error responses (default: true)
+    /// Whether to use RFC 7807 Problem Details for error responses (default: false)
     pub(crate) rfc7807_errors: bool,
+    /// Custom base URI for RFC 7807 `type` field (default: "about:blank")
+    pub(crate) rfc7807_base_uri: String,
 }
 
 impl Rapina {
@@ -98,6 +100,7 @@ impl Rapina {
             #[cfg(feature = "websocket")]
             relay_config: None,
             rfc7807_errors: false,
+            rfc7807_base_uri: "about:blank".to_string(),
         }
     }
 
@@ -295,6 +298,26 @@ impl Rapina {
         self
     }
 
+    /// Sets the base URI used for RFC 7807 `type` field.
+    ///
+    /// Error codes are appended as kebab-case path segments.
+    /// For example, with `"https://myapp.com/errors"`, a `NOT_FOUND`
+    /// error produces `"https://myapp.com/errors/not-found"`.
+    ///
+    /// Defaults to `"about:blank"` per RFC 7807 §4.2.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let app = Rapina::new()
+    ///     .enable_rfc7807_errors()
+    ///     .rfc7807_base_uri("https://myapp.com/errors");
+    /// ```
+    pub fn rfc7807_base_uri(mut self, uri: impl Into<String>) -> Self {
+        self.rfc7807_base_uri = uri.into();
+        self
+    }
+
     /// Sets the graceful shutdown timeout.
     ///
     /// When the server receives a shutdown signal (SIGINT/SIGTERM), it stops
@@ -463,7 +486,10 @@ impl Rapina {
     /// Both [`listen`](Self::listen) and [`TestClient::new`](crate::testing::TestClient::new)
     /// call this so the app behaves identically in tests and production.
     pub(crate) fn prepare(mut self) -> Self {
-        crate::error::set_rfc7807_error_format(self.rfc7807_errors);
+        self.state = self.state.with(crate::error::ErrorConfig {
+            use_rfc7807: self.rfc7807_errors,
+            base_uri: self.rfc7807_base_uri.clone(),
+        });
 
         // Auto-discover routes from inventory (must run before auth middleware)
         if self.auto_discover {

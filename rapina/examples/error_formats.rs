@@ -26,6 +26,7 @@ async fn main() -> std::io::Result<()> {
         )
         // Enable RFC 7807 format globally for this server
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .listen("0.0.0.0:3000")
         .await?;
 

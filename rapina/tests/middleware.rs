@@ -7,11 +7,9 @@ use rapina::middleware::{
 };
 use rapina::prelude::*;
 use rapina::testing::TestClient;
-use serial_test::serial;
 use std::time::Duration;
 
 #[tokio::test]
-#[serial]
 async fn test_middleware_execution() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -27,7 +25,6 @@ async fn test_middleware_execution() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_trace_id_middleware_adds_header() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -48,7 +45,6 @@ async fn test_trace_id_middleware_adds_header() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_trace_id_unique_per_request() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -78,7 +74,6 @@ async fn test_trace_id_unique_per_request() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_timeout_middleware_passes_fast_request() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -97,7 +92,6 @@ async fn test_timeout_middleware_passes_fast_request() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_body_limit_middleware_allows_small_body() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -118,7 +112,6 @@ async fn test_body_limit_middleware_allows_small_body() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_multiple_middlewares() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -137,7 +130,6 @@ async fn test_multiple_middlewares() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_middleware_order_trace_id_first() {
     // When TraceIdMiddleware is first, it should wrap the entire request
     let app = Rapina::new()
@@ -154,7 +146,6 @@ async fn test_middleware_order_trace_id_first() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_middleware_with_post_request() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -180,7 +171,6 @@ async fn test_middleware_with_post_request() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_default_timeout_middleware() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -194,7 +184,6 @@ async fn test_default_timeout_middleware() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_default_body_limit_middleware() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -208,7 +197,6 @@ async fn test_default_body_limit_middleware() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_middleware_preserves_response_body() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -233,7 +221,6 @@ async fn test_middleware_preserves_response_body() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_middleware_with_error_response() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -253,7 +240,6 @@ async fn test_middleware_with_error_response() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_middleware_with_404() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -269,7 +255,6 @@ async fn test_middleware_with_404() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_cors_preflight_returns_204() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -300,7 +285,6 @@ async fn test_cors_preflight_returns_204() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_cors_rejects_disallowed_origin() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -327,7 +311,6 @@ async fn test_cors_rejects_disallowed_origin() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_cors_allows_matching_origin() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -353,7 +336,6 @@ async fn test_cors_allows_matching_origin() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_cors_permissive_returns_wildcard() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -373,7 +355,6 @@ async fn test_cors_permissive_returns_wildcard() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_rate_limit_allows_under_limit() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -390,7 +371,6 @@ async fn test_rate_limit_allows_under_limit() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_rate_limit_returns_429_when_exceeded() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -409,7 +389,6 @@ async fn test_rate_limit_returns_429_when_exceeded() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_rate_limit_includes_retry_after_header() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -433,11 +412,11 @@ async fn test_rate_limit_includes_retry_after_header() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_rate_limit_returns_json_error() {
     let app = Rapina::new()
         .with_introspection(false)
         .enable_rfc7807_errors()
+        .rfc7807_base_uri("https://userapina.com/errors/")
         .with_rate_limit(RateLimitConfig::new(1.0, 1))
         .router(Router::new().route(http::Method::GET, "/", |_, _, _| async { "ok" }));
 
@@ -458,7 +437,6 @@ async fn test_rate_limit_returns_json_error() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_rate_limit_per_minute_convenience() {
     // Test the per_minute convenience constructor
     let app = Rapina::new()
@@ -485,7 +463,6 @@ async fn test_rate_limit_per_minute_convenience() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_compression_gzip() {
     let large_body = "hello from rapina ".repeat(100);
     let body_clone = large_body.clone();
@@ -511,7 +488,6 @@ async fn test_compression_gzip() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_compression_skips_small_response() {
     let app = Rapina::new()
         .with_introspection(false)
@@ -530,7 +506,6 @@ async fn test_compression_skips_small_response() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_compression_skips_without_accept_encoding() {
     let large_body = "hello from rapina ".repeat(100);
     let body_clone = large_body.clone();
