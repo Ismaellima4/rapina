@@ -72,6 +72,8 @@ pub struct Rapina {
     /// Relay configuration (if enabled)
     #[cfg(feature = "websocket")]
     pub(crate) relay_config: Option<crate::relay::RelayConfig>,
+    /// Whether to use RFC 7807 Problem Details for error responses (default: true)
+    pub(crate) rfc7807_errors: bool,
 }
 
 impl Rapina {
@@ -95,6 +97,7 @@ impl Rapina {
             shutdown_hooks: Vec::new(),
             #[cfg(feature = "websocket")]
             relay_config: None,
+            rfc7807_errors: false,
         }
     }
 
@@ -281,6 +284,17 @@ impl Rapina {
         self
     }
 
+    /// Enables RFC 7807 Problem Details for error responses.
+    ///
+    /// When enabled, error responses use the `application/problem+json`
+    /// content type and follow the RFC 7807 structure.
+    ///
+    /// This is disabled by default for backwards compatibility.
+    pub fn enable_rfc7807_errors(mut self) -> Self {
+        self.rfc7807_errors = true;
+        self
+    }
+
     /// Sets the graceful shutdown timeout.
     ///
     /// When the server receives a shutdown signal (SIGINT/SIGTERM), it stops
@@ -449,6 +463,8 @@ impl Rapina {
     /// Both [`listen`](Self::listen) and [`TestClient::new`](crate::testing::TestClient::new)
     /// call this so the app behaves identically in tests and production.
     pub(crate) fn prepare(mut self) -> Self {
+        crate::error::set_rfc7807_error_format(self.rfc7807_errors);
+
         // Auto-discover routes from inventory (must run before auth middleware)
         if self.auto_discover {
             let manual_count = self.router.routes.len();
