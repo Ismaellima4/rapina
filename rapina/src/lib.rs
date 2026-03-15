@@ -136,7 +136,9 @@ pub mod prelude {
     #[cfg(feature = "multipart")]
     pub use crate::extract::{Field, Multipart};
     pub use crate::introspection::RouteInfo;
-    pub use crate::middleware::{KeyExtractor, Middleware, Next, RateLimitConfig};
+    pub use crate::middleware::{
+        KeyExtractor, Middleware, Next, RateLimitConfig, RequestLogConfig,
+    };
     pub use crate::observability::TracingConfig;
     #[cfg(feature = "database")]
     pub use crate::pagination::{Paginate, Paginated, PaginationConfig};
