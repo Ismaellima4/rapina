@@ -96,6 +96,8 @@ pub mod extract;
 pub mod handler;
 pub mod health;
 pub mod introspection;
+#[cfg(feature = "database")]
+pub mod jobs;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod middleware;
@@ -137,6 +139,8 @@ pub mod prelude {
     #[cfg(feature = "multipart")]
     pub use crate::extract::{Field, Multipart};
     pub use crate::introspection::RouteInfo;
+    #[cfg(feature = "database")]
+    pub use crate::jobs::{JobRow, JobStatus};
     pub use crate::middleware::{
         KeyExtractor, Middleware, Next, RateLimitConfig, RequestLogConfig,
     };
