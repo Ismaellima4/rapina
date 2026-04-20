@@ -1,98 +1,8 @@
+use colored::Colorize;
 use std::path::Path;
 
-use colored::Colorize;
-
-use super::codegen::{self, FieldInfo};
-
-fn parse_field(input: &str) -> Result<FieldInfo, String> {
-    let parts: Vec<&str> = input.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return Err(format!(
-            "Invalid field format '{}'. Expected 'name:type' (e.g., 'title:string')",
-            input
-        ));
-    }
-
-    let name = parts[0].trim();
-    let type_str = parts[1].trim();
-
-    if name.is_empty() {
-        return Err("Field name cannot be empty".to_string());
-    }
-
-    for c in name.chars() {
-        if !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '_' {
-            return Err(format!(
-                "Field name must be lowercase alphanumeric with underscores, got '{}'",
-                name
-            ));
-        }
-    }
-
-    let (rust_type, schema_type, column_method) = match type_str.to_lowercase().as_str() {
-        "string" => ("String", "String", ".string().not_null()"),
-        "text" => ("String", "Text", ".text().not_null()"),
-        "i32" | "integer" => ("i32", "i32", ".integer().not_null()"),
-        "i64" | "bigint" => ("i64", "i64", ".big_integer().not_null()"),
-        "f32" | "float" => ("f32", "f32", ".float().not_null()"),
-        "f64" | "double" => ("f64", "f64", ".double().not_null()"),
-        "bool" | "boolean" => ("bool", "bool", ".boolean().not_null()"),
-        "uuid" => ("Uuid", "Uuid", ".uuid().not_null()"),
-        "datetime" | "timestamptz" => (
-            "DateTimeUtc",
-            "DateTime",
-            ".timestamp_with_time_zone().not_null()",
-        ),
-        "naivedatetime" | "timestamp" => ("DateTime", "NaiveDateTime", ".date_time().not_null()"),
-        "date" => ("Date", "Date", ".date().not_null()"),
-        "decimal" => ("Decimal", "Decimal", ".decimal().not_null()"),
-        "json" => ("Json", "Json", ".json().not_null()"),
-        _ => {
-            return Err(format!(
-                "Unknown field type '{}'. Supported types: string, text, i32/integer, i64/bigint, \
-                 f32/float, f64/double, bool/boolean, uuid, datetime/timestamptz, \
-                 naivedatetime/timestamp, date, decimal, json",
-                type_str
-            ));
-        }
-    };
-
-    Ok(FieldInfo {
-        name: name.to_string(),
-        rust_type: rust_type.to_string(),
-        schema_type: schema_type.to_string(),
-        column_method: column_method.to_string(),
-        nullable: false,
-    })
-}
-
-fn validate_resource_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("Resource name cannot be empty".to_string());
-    }
-
-    for c in name.chars() {
-        if !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '_' {
-            return Err(format!(
-                "Resource name must be lowercase alphanumeric with underscores, got '{}'",
-                c
-            ));
-        }
-    }
-
-    if name.starts_with('_') || name.ends_with('_') {
-        return Err("Resource name cannot start or end with underscore".to_string());
-    }
-
-    let reserved = [
-        "self", "super", "crate", "mod", "type", "fn", "struct", "enum", "impl",
-    ];
-    if reserved.contains(&name) {
-        return Err(format!("'{}' is a reserved Rust keyword", name));
-    }
-
-    Ok(())
-}
+use super::{FieldInfo, codegen};
+use crate::commands::{NormalizedType, ValidationContext};
 
 fn print_next_steps(pascal: &str) {
     println!();
@@ -107,36 +17,35 @@ fn print_next_steps(pascal: &str) {
     println!();
 }
 
-pub fn resource(name: &str, field_args: &[String]) -> Result<(), String> {
-    validate_resource_name(name)?;
+pub fn resource(name: String, fields: Vec<FieldInfo>) -> Result<(), String> {
+    ValidationContext::Resource.validate(&name)?;
     codegen::verify_rapina_project()?;
 
-    if field_args.is_empty() {
+    if fields.is_empty() {
         return Err(
             "At least one field is required. Usage: rapina add resource <name> <field:type> ..."
                 .to_string(),
         );
     }
 
-    let fields: Vec<FieldInfo> = field_args
-        .iter()
-        .map(|arg| parse_field(arg))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let singular = name;
-    let plural = &codegen::pluralize(name);
-    let pascal = &codegen::to_pascal_case(name);
+    let plural = &codegen::pluralize(&name);
+    let pascal = &codegen::to_pascal_case(&name);
     let pascal_plural = &codegen::to_pascal_case(plural);
 
     println!();
     println!("  {} {}", "Adding resource:".bright_cyan(), pascal.bold());
     println!();
 
-    let pk_type = "i32"; // New resources default to i32 PK
+    // verify if exists id field and get type
+    // default is i32
+    let pk_type = fields
+        .iter()
+        .find(|f| f.name == "id")
+        .map_or(NormalizedType::I32, |f| f.normalized_type.clone());
 
-    codegen::create_feature_module(singular, plural, pascal, &fields, pk_type, false)?;
+    codegen::create_feature_module(&name, plural, pascal, &fields, &pk_type, false)?;
     codegen::update_entity_file(pascal, &fields, None, None, false)?;
-    codegen::create_migration_file(plural, pascal_plural, &fields, pk_type)?;
+    codegen::create_migration_file(plural, pascal_plural, &fields, &pk_type)?;
 
     if let Err(e) = codegen::wire_main_rs(&[plural.as_str()], Path::new(".")) {
         eprintln!("  {} Could not auto-wire main.rs: {}", "!".yellow(), e);
@@ -149,90 +58,7 @@ pub fn resource(name: &str, field_args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_field_valid() {
-        let f = parse_field("name:string").unwrap();
-        assert_eq!(f.name, "name");
-        assert_eq!(f.rust_type, "String");
-        assert_eq!(f.schema_type, "String");
-
-        let f = parse_field("active:bool").unwrap();
-        assert_eq!(f.name, "active");
-        assert_eq!(f.rust_type, "bool");
-
-        let f = parse_field("age:i32").unwrap();
-        assert_eq!(f.name, "age");
-        assert_eq!(f.rust_type, "i32");
-
-        let f = parse_field("count:integer").unwrap();
-        assert_eq!(f.name, "count");
-        assert_eq!(f.rust_type, "i32");
-
-        let f = parse_field("score:f64").unwrap();
-        assert_eq!(f.name, "score");
-        assert_eq!(f.rust_type, "f64");
-
-        let f = parse_field("external_id:uuid").unwrap();
-        assert_eq!(f.name, "external_id");
-        assert_eq!(f.rust_type, "Uuid");
-    }
-
-    #[test]
-    fn test_parse_field_all_types() {
-        let cases = vec![
-            ("x:string", "String", "String"),
-            ("x:text", "String", "Text"),
-            ("x:i32", "i32", "i32"),
-            ("x:integer", "i32", "i32"),
-            ("x:i64", "i64", "i64"),
-            ("x:bigint", "i64", "i64"),
-            ("x:f32", "f32", "f32"),
-            ("x:float", "f32", "f32"),
-            ("x:f64", "f64", "f64"),
-            ("x:double", "f64", "f64"),
-            ("x:bool", "bool", "bool"),
-            ("x:boolean", "bool", "bool"),
-            ("x:uuid", "Uuid", "Uuid"),
-            ("x:datetime", "DateTimeUtc", "DateTime"),
-            ("x:timestamptz", "DateTimeUtc", "DateTime"),
-            ("x:naivedatetime", "DateTime", "NaiveDateTime"),
-            ("x:timestamp", "DateTime", "NaiveDateTime"),
-            ("x:date", "Date", "Date"),
-            ("x:decimal", "Decimal", "Decimal"),
-            ("x:json", "Json", "Json"),
-        ];
-        for (input, expected_rust, expected_schema) in cases {
-            let f = parse_field(input).unwrap();
-            assert_eq!(f.rust_type, expected_rust, "failed for {}", input);
-            assert_eq!(f.schema_type, expected_schema, "failed for {}", input);
-        }
-    }
-
-    #[test]
-    fn test_parse_field_invalid() {
-        assert!(parse_field("name").is_err());
-        assert!(parse_field(":string").is_err());
-        assert!(parse_field("name:unknown").is_err());
-        assert!(parse_field("Name:string").is_err());
-    }
-
-    #[test]
-    fn test_validate_resource_name_valid() {
-        assert!(validate_resource_name("user").is_ok());
-        assert!(validate_resource_name("blog_post").is_ok());
-        assert!(validate_resource_name("item123").is_ok());
-    }
-
-    #[test]
-    fn test_validate_resource_name_invalid() {
-        assert!(validate_resource_name("").is_err());
-        assert!(validate_resource_name("User").is_err());
-        assert!(validate_resource_name("_user").is_err());
-        assert!(validate_resource_name("user_").is_err());
-        assert!(validate_resource_name("self").is_err());
-        assert!(validate_resource_name("user-name").is_err());
-    }
+    use crate::commands::{ColumnMethod, NormalizedType};
 
     #[test]
     fn test_to_pascal_case() {
@@ -254,20 +80,19 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "title".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "String".to_string(),
-                column_method: ".string().not_null()".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(".string().not_null()".to_string()),
                 nullable: false,
             },
             FieldInfo {
                 name: "active".to_string(),
-                rust_type: "bool".to_string(),
-                schema_type: "bool".to_string(),
-                column_method: ".boolean().not_null()".to_string(),
+                normalized_type: NormalizedType::Bool,
+                column_method: ColumnMethod(".boolean().not_null()".to_string()),
                 nullable: false,
             },
         ];
-        let content = codegen::generate_handlers("post", "posts", "Post", &fields, "i32");
+        let content =
+            codegen::generate_handlers("post", "posts", "Post", &fields, &NormalizedType::I32);
 
         assert!(content.contains("use crate::entity::Post;"));
         assert!(content.contains("use crate::entity::post::{ActiveModel, Model};"));
@@ -291,16 +116,14 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "name".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "String".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "age".to_string(),
-                rust_type: "i32".to_string(),
-                schema_type: "i32".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::I32,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
         ];
@@ -319,16 +142,14 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "title".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "String".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "bio".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "Text".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(String::new()),
                 nullable: true,
             },
         ];
@@ -347,16 +168,14 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "id".to_string(),
-                rust_type: "Uuid".to_string(),
-                schema_type: "Uuid".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::Uuid,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "price".to_string(),
-                rust_type: "Decimal".to_string(),
-                schema_type: "Decimal".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::Decimal,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
         ];
@@ -374,16 +193,14 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "created_at".to_string(),
-                rust_type: "DateTimeUtc".to_string(),
-                schema_type: "DateTime".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::DateTimeUtc,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "metadata".to_string(),
-                rust_type: "Json".to_string(),
-                schema_type: "Json".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::Json,
+                column_method: ColumnMethod(String::new()),
                 nullable: true,
             },
         ];
@@ -397,9 +214,8 @@ mod tests {
     fn test_generate_dto_sea_orm_date_import() {
         let fields = vec![FieldInfo {
             name: "birthday".to_string(),
-            rust_type: "Date".to_string(),
-            schema_type: "Date".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::Date,
+            column_method: ColumnMethod(String::new()),
             nullable: false,
         }];
         let content = codegen::generate_dto("Person", &fields);
@@ -413,30 +229,26 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "id".to_string(),
-                rust_type: "Uuid".to_string(),
-                schema_type: "Uuid".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::Uuid,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "amount".to_string(),
-                rust_type: "Decimal".to_string(),
-                schema_type: "Decimal".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::Decimal,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "created_at".to_string(),
-                rust_type: "DateTimeUtc".to_string(),
-                schema_type: "DateTime".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::DateTimeUtc,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "name".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "String".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
         ];
@@ -452,9 +264,8 @@ mod tests {
     fn test_generate_dto_primitives_no_extra_imports() {
         let fields = vec![FieldInfo {
             name: "name".to_string(),
-            rust_type: "String".to_string(),
-            schema_type: "String".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::String,
+            column_method: ColumnMethod(String::new()),
             nullable: false,
         }];
         let content = codegen::generate_dto("Simple", &fields);
@@ -480,16 +291,14 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "title".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "String".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
             FieldInfo {
                 name: "done".to_string(),
-                rust_type: "bool".to_string(),
-                schema_type: "bool".to_string(),
-                column_method: String::new(),
+                normalized_type: NormalizedType::Bool,
+                column_method: ColumnMethod(String::new()),
                 nullable: false,
             },
         ];
@@ -506,20 +315,18 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "title".to_string(),
-                rust_type: "String".to_string(),
-                schema_type: "String".to_string(),
-                column_method: ".string().not_null()".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod(".string().not_null()".to_string()),
                 nullable: false,
             },
             FieldInfo {
                 name: "published".to_string(),
-                rust_type: "bool".to_string(),
-                schema_type: "bool".to_string(),
-                column_method: ".boolean().not_null()".to_string(),
+                normalized_type: NormalizedType::Bool,
+                column_method: ColumnMethod(".boolean().not_null()".to_string()),
                 nullable: false,
             },
         ];
-        let content = codegen::generate_migration("posts", "Posts", &fields, "i32");
+        let content = codegen::generate_migration("posts", "Posts", &fields, &NormalizedType::I32);
 
         assert!(content.contains("MigrationTrait for Migration"));
         assert!(content.contains("Posts::Table"));

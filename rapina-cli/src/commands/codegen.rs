@@ -1,14 +1,6 @@
-use colored::Colorize;
+use super::{Colorize, FieldInfo, NormalizedType};
 use std::fs;
 use std::path::Path;
-
-pub(crate) struct FieldInfo {
-    pub name: String,
-    pub rust_type: String,
-    pub schema_type: String,
-    pub column_method: String,
-    pub nullable: bool,
-}
 
 pub(crate) fn to_pascal_case(s: &str) -> String {
     s.split('_')
@@ -210,7 +202,7 @@ pub(crate) fn generate_handlers(
     plural: &str,
     pascal: &str,
     fields: &[FieldInfo],
-    pk_type: &str,
+    pk_type: &NormalizedType,
 ) -> String {
     let create_fields: Vec<String> = fields
         .iter()
@@ -229,7 +221,7 @@ pub(crate) fn generate_handlers(
         .collect();
     let update_body = update_checks.join("\n");
 
-    let uuid_import = if pk_type.to_lowercase().as_str() == "uuid" {
+    let uuid_import = if pk_type == &NormalizedType::Uuid {
         "use rapina::uuid::Uuid;"
     } else {
         ""
@@ -325,29 +317,35 @@ pub(crate) fn generate_dto(pascal: &str, fields: &[FieldInfo]) -> String {
         .iter()
         .map(|f| {
             if f.nullable {
-                format!("    pub {}: Option<{}>,", f.name, f.rust_type)
+                format!("    pub {}: Option<{}>,", f.name, f.normalized_type)
             } else {
-                format!("    pub {}: {},", f.name, f.rust_type)
+                format!("    pub {}: {},", f.name, f.normalized_type)
             }
         })
         .collect();
 
     let update_fields: Vec<String> = fields
         .iter()
-        .map(|f| format!("    pub {}: Option<{}>,", f.name, f.rust_type))
+        .map(|f| format!("    pub {}: Option<{}>,", f.name, f.normalized_type))
         .collect();
 
     // Build type-specific imports instead of sea_orm glob.
     // Uuid and Decimal must come from their original crates (not sea_orm re-exports)
     // because the sea_orm re-exports don't implement JsonSchema.
-    let needs_uuid = fields.iter().any(|f| f.rust_type == "Uuid");
-    let needs_decimal = fields.iter().any(|f| f.rust_type == "Decimal");
-
-    let sea_orm_types: Vec<&str> = fields
+    let needs_uuid = fields
         .iter()
-        .filter_map(|f| match f.rust_type.as_str() {
-            "DateTimeUtc" | "Date" | "Json" => Some(f.rust_type.as_str()),
-            _ => None,
+        .any(|f| f.normalized_type == NormalizedType::Uuid);
+
+    let needs_decimal = fields
+        .iter()
+        .any(|f| f.normalized_type == NormalizedType::Decimal);
+
+    let sea_orm_types: Vec<String> = fields
+        .iter()
+        .filter_map(|f| {
+            f.normalized_type
+                .sea_orm_import_name()
+                .map(|s| s.to_string())
         })
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
@@ -446,7 +444,13 @@ pub(crate) fn generate_schema_block(
 ) -> String {
     let schema_fields: Vec<String> = fields
         .iter()
-        .map(|f| format!("        {}: {},", f.name, f.schema_type))
+        .map(|f| {
+            format!(
+                "        {}: {},",
+                f.name,
+                f.normalized_type.schema_type_name()
+            )
+        })
         .collect();
 
     let mut attrs = String::new();
@@ -478,7 +482,7 @@ pub(crate) fn generate_migration(
     plural: &str,
     pascal_plural: &str,
     fields: &[FieldInfo],
-    pk_type: &str,
+    pk_type: &NormalizedType,
 ) -> String {
     let column_defs: Vec<String> = fields
         .iter()
@@ -502,14 +506,16 @@ pub(crate) fn generate_migration(
 
     let readable_name = format!("create {}", plural);
 
-    let col = match pk_type.to_lowercase().as_str() {
-        "uuid" => format!("ColumnDef::new({pascal_plural}::Id).uuid().not_null().primary_key()"),
-        "i32" | "integer" => {
+    let col = match pk_type {
+        NormalizedType::Uuid => {
+            format!("ColumnDef::new({pascal_plural}::Id).uuid().not_null().primary_key()")
+        }
+        NormalizedType::I32 => {
             format!(
                 "ColumnDef::new({pascal_plural}::Id).integer().not_null().auto_increment().primary_key()"
             )
         }
-        "i64" | "bigint" => {
+        NormalizedType::I64 => {
             format!(
                 "ColumnDef::new({pascal_plural}::Id).big_integer().not_null().auto_increment().primary_key()"
             )
@@ -665,7 +671,7 @@ pub(crate) fn create_migration_file(
     plural: &str,
     pascal_plural: &str,
     fields: &[FieldInfo],
-    pk_type: &str,
+    pk_type: &NormalizedType,
 ) -> Result<(), String> {
     let migrations_dir = Path::new("src/migrations");
 
@@ -699,7 +705,7 @@ pub(crate) fn create_feature_module(
     plural: &str,
     pascal: &str,
     fields: &[FieldInfo],
-    pk_type: &str,
+    pk_type: &NormalizedType,
     force: bool,
 ) -> Result<(), String> {
     create_feature_module_in(
@@ -718,7 +724,7 @@ fn create_feature_module_in(
     plural: &str,
     pascal: &str,
     fields: &[FieldInfo],
-    pk_type: &str,
+    pk_type: &NormalizedType,
     force: bool,
     base: &Path,
 ) -> Result<(), String> {
@@ -972,6 +978,8 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
+    use crate::commands::ColumnMethod;
+
     use super::*;
 
     #[test]
@@ -1188,12 +1196,172 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_handlers() {
+        let fields = vec![
+            FieldInfo {
+                name: "title".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod::new(&NormalizedType::String, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "active".to_string(),
+                normalized_type: NormalizedType::Bool,
+                column_method: ColumnMethod::new(&NormalizedType::Bool, false),
+                nullable: false,
+            },
+        ];
+        let content = generate_handlers("post", "posts", "Post", &fields, &NormalizedType::I32);
+
+        assert!(content.contains("pub async fn list_posts"));
+        assert!(content.contains("pub async fn get_post"));
+        assert!(content.contains("pub async fn create_post"));
+        assert!(content.contains("pub async fn update_post"));
+        assert!(content.contains("pub async fn delete_post"));
+        assert!(content.contains("title: Set(input.title),"));
+        assert!(content.contains("active: Set(input.active),"));
+    }
+
+    #[test]
+    fn test_generate_dto() {
+        let fields = vec![
+            FieldInfo {
+                name: "name".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod::new(&NormalizedType::String, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "age".to_string(),
+                normalized_type: NormalizedType::I32,
+                column_method: ColumnMethod::new(&NormalizedType::I32, false),
+                nullable: false,
+            },
+        ];
+        let content = generate_dto("User", &fields);
+
+        assert!(content.contains("pub struct CreateUser"));
+        assert!(content.contains("pub struct UpdateUser"));
+        assert!(content.contains("pub name: String,"));
+        assert!(content.contains("pub age: i32,"));
+    }
+
+    #[test]
+    fn test_generate_dto_nullable_fields() {
+        let fields = vec![
+            FieldInfo {
+                name: "title".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod::new(&NormalizedType::String, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "bio".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod::new(&NormalizedType::String, true),
+                nullable: true,
+            },
+        ];
+        let content = generate_dto("User", &fields);
+
+        assert!(content.contains("pub title: String,"));
+        assert!(content.contains("pub bio: Option<String>,"));
+    }
+
+    #[test]
+    fn test_generate_dto_uuid_decimal_imports() {
+        let fields = vec![
+            FieldInfo {
+                name: "id".to_string(),
+                normalized_type: NormalizedType::Uuid,
+                column_method: ColumnMethod::new(&NormalizedType::Uuid, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "price".to_string(),
+                normalized_type: NormalizedType::Decimal,
+                column_method: ColumnMethod::new(&NormalizedType::Decimal, false),
+                nullable: false,
+            },
+        ];
+        let content = generate_dto("Product", &fields);
+
+        assert!(content.contains("use rapina::uuid::Uuid;"));
+        assert!(content.contains("use rapina::rust_decimal::Decimal;"));
+    }
+
+    #[test]
+    fn test_generate_dto_sea_orm_types_import() {
+        let fields = vec![
+            FieldInfo {
+                name: "created_at".to_string(),
+                normalized_type: NormalizedType::DateTimeUtc,
+                column_method: ColumnMethod::new(&NormalizedType::DateTimeUtc, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "metadata".to_string(),
+                normalized_type: NormalizedType::Json,
+                column_method: ColumnMethod::new(&NormalizedType::Json, true),
+                nullable: true,
+            },
+        ];
+        let content = generate_dto("Event", &fields);
+
+        assert!(content.contains("use rapina::sea_orm::prelude::{DateTimeUtc, Json};"));
+    }
+
+    #[test]
+    fn test_generate_schema_block() {
+        let fields = vec![
+            FieldInfo {
+                name: "title".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod::new(&NormalizedType::String, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "done".to_string(),
+                normalized_type: NormalizedType::Bool,
+                column_method: ColumnMethod::new(&NormalizedType::Bool, false),
+                nullable: false,
+            },
+        ];
+        let content = generate_schema_block("Todo", &fields, None, None);
+
+        assert!(content.contains("title: String,"));
+        assert!(content.contains("done: bool,"));
+    }
+
+    #[test]
+    fn test_generate_migration() {
+        let fields = vec![
+            FieldInfo {
+                name: "title".to_string(),
+                normalized_type: NormalizedType::String,
+                column_method: ColumnMethod::new(&NormalizedType::String, false),
+                nullable: false,
+            },
+            FieldInfo {
+                name: "published".to_string(),
+                normalized_type: NormalizedType::Bool,
+                column_method: ColumnMethod::new(&NormalizedType::Bool, false),
+                nullable: false,
+            },
+        ];
+        let content = generate_migration("posts", "Posts", &fields, &NormalizedType::I32);
+
+        dbg!(&fields[1].column_method.0);
+        assert!(content.contains(".string().not_null()"));
+        assert!(content.contains(".boolean().not_null()"));
+    }
+
+    #[test]
     fn test_generate_schema_block_with_timestamps() {
         let fields = vec![FieldInfo {
             name: "title".to_string(),
-            rust_type: "String".to_string(),
-            schema_type: "String".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::String,
+            column_method: ColumnMethod::new(&NormalizedType::String, false),
             nullable: false,
         }];
 
@@ -1215,16 +1383,14 @@ mod tests {
         let fields = vec![
             FieldInfo {
                 name: "user_id".to_string(),
-                rust_type: "i32".to_string(),
-                schema_type: "i32".to_string(),
-                column_method: ".integer().not_null()".to_string(),
+                normalized_type: NormalizedType::I32,
+                column_method: ColumnMethod::new(&NormalizedType::I32, false),
                 nullable: false,
             },
             FieldInfo {
                 name: "role_id".to_string(),
-                rust_type: "i32".to_string(),
-                schema_type: "i32".to_string(),
-                column_method: ".integer().not_null()".to_string(),
+                normalized_type: NormalizedType::I32,
+                column_method: ColumnMethod::new(&NormalizedType::I32, false),
                 nullable: false,
             },
         ];
@@ -1282,14 +1448,20 @@ schema! {
 
         let fields = vec![FieldInfo {
             name: "email".to_string(),
-            rust_type: "String".to_string(),
-            schema_type: "String".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::String,
+            column_method: ColumnMethod::new(&NormalizedType::String, false),
             nullable: false,
         }];
 
-        let result =
-            create_feature_module_in("user", "users", "User", &fields, "i32", false, dir.path());
+        let result = create_feature_module_in(
+            "user",
+            "users",
+            "User",
+            &fields,
+            &NormalizedType::I32,
+            false,
+            dir.path(),
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
     }
@@ -1303,14 +1475,20 @@ schema! {
 
         let fields = vec![FieldInfo {
             name: "email".to_string(),
-            rust_type: "String".to_string(),
-            schema_type: "String".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::String,
+            column_method: ColumnMethod::new(&NormalizedType::String, false),
             nullable: false,
         }];
 
-        let result =
-            create_feature_module_in("user", "users", "User", &fields, "i32", true, dir.path());
+        let result = create_feature_module_in(
+            "user",
+            "users",
+            "User",
+            &fields,
+            &NormalizedType::I32,
+            true,
+            dir.path(),
+        );
         assert!(result.is_ok());
         let mod_content = fs::read_to_string(module_dir.join("mod.rs")).unwrap();
         assert!(mod_content.contains("pub mod"));
@@ -1335,9 +1513,8 @@ schema! {
 
         let fields = vec![FieldInfo {
             name: "title".to_string(),
-            rust_type: "String".to_string(),
-            schema_type: "String".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::String,
+            column_method: ColumnMethod::new(&NormalizedType::String, false),
             nullable: false,
         }];
 
@@ -1367,9 +1544,8 @@ schema! {
 
         let fields = vec![FieldInfo {
             name: "title".to_string(),
-            rust_type: "String".to_string(),
-            schema_type: "String".to_string(),
-            column_method: String::new(),
+            normalized_type: NormalizedType::String,
+            column_method: ColumnMethod::new(&NormalizedType::String, false),
             nullable: false,
         }];
 
