@@ -49,7 +49,7 @@ pub fn resource(name: String, fields: Vec<FieldInfo>, with_timestamps: bool) -> 
 
     codegen::create_feature_module(&name, plural, pascal, &fields, &pk_type, false)?;
     codegen::update_entity_file(pascal, &fields, timestamps_attr, None, false)?;
-    codegen::create_migration_file(plural, pascal_plural, &fields, &pk_type, with_timestamps)?;
+    codegen::create_migration_file(plural, pascal_plural, &fields, with_timestamps)?;
 
     if let Err(e) = codegen::wire_main_rs(&[plural.as_str()], Path::new(".")) {
         eprintln!("  {} Could not auto-wire main.rs: {}", "!".yellow(), e);
@@ -62,7 +62,7 @@ pub fn resource(name: String, fields: Vec<FieldInfo>, with_timestamps: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{ColumnMethod, NormalizedType};
+    use crate::commands::NormalizedType;
 
     #[test]
     fn test_to_pascal_case() {
@@ -82,18 +82,8 @@ mod tests {
     #[test]
     fn test_generate_handlers() {
         let fields = vec![
-            FieldInfo {
-                name: "title".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(".string().not_null()".to_string()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "active".to_string(),
-                normalized_type: NormalizedType::Bool,
-                column_method: ColumnMethod(".boolean().not_null()".to_string()),
-                nullable: false,
-            },
+            "title:string".parse().unwrap(),
+            "active:bool".parse().unwrap(),
         ];
         let content =
             codegen::generate_handlers("post", "posts", "Post", &fields, &NormalizedType::I32);
@@ -117,20 +107,8 @@ mod tests {
 
     #[test]
     fn test_generate_dto() {
-        let fields = vec![
-            FieldInfo {
-                name: "name".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "age".to_string(),
-                normalized_type: NormalizedType::I32,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-        ];
+        let fields: Vec<FieldInfo> =
+            vec!["name:string".parse().unwrap(), "age:i32".parse().unwrap()];
         let content = codegen::generate_dto("User", &fields);
 
         assert!(content.contains("pub struct CreateUser"));
@@ -143,20 +121,14 @@ mod tests {
 
     #[test]
     fn test_generate_dto_nullable_fields() {
-        let fields = vec![
-            FieldInfo {
-                name: "title".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "bio".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(String::new()),
-                nullable: true,
-            },
+        let mut fields: Vec<FieldInfo> = vec![
+            "title:string".parse().unwrap(),
+            "bio:string".parse().unwrap(),
         ];
+        // Note: FieldInfo::from_str currently defaults nullable to false.
+        // We manually set nullable for the test case until FromStr supports nullable syntax.
+        fields[1].nullable = true;
+
         let content = codegen::generate_dto("User", &fields);
 
         // Non-nullable field: required in CreateDTO
@@ -169,20 +141,8 @@ mod tests {
 
     #[test]
     fn test_generate_dto_uuid_decimal_imports() {
-        let fields = vec![
-            FieldInfo {
-                name: "id".to_string(),
-                normalized_type: NormalizedType::Uuid,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "price".to_string(),
-                normalized_type: NormalizedType::Decimal,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-        ];
+        let fields: Vec<FieldInfo> =
+            vec!["id:uuid".parse().unwrap(), "price:decimal".parse().unwrap()];
         let content = codegen::generate_dto("Product", &fields);
 
         // Must use original crate paths, not sea_orm re-exports
@@ -194,20 +154,14 @@ mod tests {
 
     #[test]
     fn test_generate_dto_sea_orm_types_import() {
-        let fields = vec![
-            FieldInfo {
-                name: "created_at".to_string(),
-                normalized_type: NormalizedType::DateTimeUtc,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "metadata".to_string(),
-                normalized_type: NormalizedType::Json,
-                column_method: ColumnMethod(String::new()),
-                nullable: true,
-            },
+        let fields: Vec<FieldInfo> = vec![
+            "created_at:datetimeutc".parse().unwrap(),
+            "metadata:json".parse().unwrap(),
         ];
+        // Manually set nullable for testing
+        let mut fields = fields;
+        fields[1].nullable = true;
+
         let content = codegen::generate_dto("Event", &fields);
 
         assert!(content.contains("use rapina::sea_orm::prelude::{DateTimeUtc, Json};"));
@@ -216,12 +170,7 @@ mod tests {
 
     #[test]
     fn test_generate_dto_sea_orm_date_import() {
-        let fields = vec![FieldInfo {
-            name: "birthday".to_string(),
-            normalized_type: NormalizedType::Date,
-            column_method: ColumnMethod(String::new()),
-            nullable: false,
-        }];
+        let fields = vec!["birthday:date".parse().unwrap()];
         let content = codegen::generate_dto("Person", &fields);
 
         assert!(content.contains("use rapina::sea_orm::prelude::{Date};"));
@@ -230,31 +179,11 @@ mod tests {
 
     #[test]
     fn test_generate_dto_mixed_types_imports() {
-        let fields = vec![
-            FieldInfo {
-                name: "id".to_string(),
-                normalized_type: NormalizedType::Uuid,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "amount".to_string(),
-                normalized_type: NormalizedType::Decimal,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "created_at".to_string(),
-                normalized_type: NormalizedType::DateTimeUtc,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "name".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
+        let fields: Vec<FieldInfo> = vec![
+            "id:uuid".parse().unwrap(),
+            "amount:decimal".parse().unwrap(),
+            "created_at:datetimeutc".parse().unwrap(),
+            "name:string".parse().unwrap(),
         ];
         let content = codegen::generate_dto("Order", &fields);
 
@@ -266,12 +195,7 @@ mod tests {
 
     #[test]
     fn test_generate_dto_primitives_no_extra_imports() {
-        let fields = vec![FieldInfo {
-            name: "name".to_string(),
-            normalized_type: NormalizedType::String,
-            column_method: ColumnMethod(String::new()),
-            nullable: false,
-        }];
+        let fields: Vec<FieldInfo> = vec!["name:string".parse().unwrap()];
         let content = codegen::generate_dto("Simple", &fields);
 
         assert!(!content.contains("sea_orm"));
@@ -292,19 +216,9 @@ mod tests {
 
     #[test]
     fn test_generate_schema_block() {
-        let fields = vec![
-            FieldInfo {
-                name: "title".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "done".to_string(),
-                normalized_type: NormalizedType::Bool,
-                column_method: ColumnMethod(String::new()),
-                nullable: false,
-            },
+        let fields: Vec<FieldInfo> = vec![
+            "title:string".parse().unwrap(),
+            "done:bool".parse().unwrap(),
         ];
         let content = codegen::generate_schema_block("Todo", &fields, None, None);
 
@@ -316,32 +230,18 @@ mod tests {
 
     #[test]
     fn test_generate_migration() {
-        let fields = vec![
-            FieldInfo {
-                name: "title".to_string(),
-                normalized_type: NormalizedType::String,
-                column_method: ColumnMethod(".string().not_null()".to_string()),
-                nullable: false,
-            },
-            FieldInfo {
-                name: "published".to_string(),
-                normalized_type: NormalizedType::Bool,
-                column_method: ColumnMethod(
-                    ".boolean().not_null().default(Expr::value(false))".to_string(),
-                ),
-                nullable: false,
-            },
+        let fields: Vec<FieldInfo> = vec![
+            "title:string".parse().unwrap(),
+            "published:bool".parse().unwrap(),
         ];
-        let content =
-            codegen::generate_migration("posts", "Posts", &fields, &NormalizedType::I32, false);
+        let content = codegen::generate_migration("posts", "Posts", &fields, false);
 
         assert!(content.contains("MigrationTrait for Migration"));
         assert!(content.contains("Posts::Table"));
-        assert!(content.contains("Posts::Id"));
         assert!(content.contains("Posts::Title"));
         assert!(content.contains("Posts::Published"));
         assert!(content.contains(".string().not_null()"));
-        assert!(content.contains(".boolean().not_null().default(Expr::value(false))"));
+        assert!(content.contains(".boolean().default(Expr::value(false)).not_null()"));
         assert!(content.contains("enum Posts {"));
         assert!(content.contains("drop_table"));
         // no timestamps when with_timestamps=false
@@ -353,29 +253,21 @@ mod tests {
     fn test_boolean_field_has_default_false() {
         let f = "active:bool".parse::<FieldInfo>().unwrap();
         assert!(
-            f.column_method.0.contains(".default(Expr::value(false))"),
-            "boolean column_method must include default(false), got: {}",
-            f.column_method
+            f.generate_column("Active")
+                .contains(".default(Expr::value(false))"),
         );
 
         let f2 = "enabled:boolean".parse::<FieldInfo>().unwrap();
         assert!(
-            f2.column_method.0.contains(".default(Expr::value(false))"),
-            "boolean column_method must include default(false), got: {}",
-            f2.column_method
+            f2.generate_column("Enabled")
+                .contains(".default(Expr::value(false))"),
         );
     }
 
     #[test]
     fn test_generate_migration_with_timestamps() {
-        let fields = vec![FieldInfo {
-            name: "title".to_string(),
-            normalized_type: NormalizedType::String,
-            column_method: ColumnMethod(".string().not_null()".to_string()),
-            nullable: false,
-        }];
-        let content =
-            codegen::generate_migration("posts", "Posts", &fields, &NormalizedType::I32, true);
+        let fields = vec!["title:string".parse().unwrap()];
+        let content = codegen::generate_migration("posts", "Posts", &fields, true);
 
         assert!(content.contains("Posts::CreatedAt"));
         assert!(content.contains("Posts::UpdatedAt"));

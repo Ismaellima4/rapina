@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::{Colorize, ColumnMethod, FieldInfo, NormalizedType, codegen};
+use super::{Colorize, FieldInfo, NormalizedType, codegen};
 
 // ---------------------------------------------------------------------------
 // Intermediate representation
@@ -141,14 +141,13 @@ fn normalized_to_field_info(
     }
 
     let normalized_type = col_type.clone();
-    let column_method = ColumnMethod::new(&normalized_type, is_nullable);
 
-    Some(FieldInfo {
-        name: col_name.to_string(),
+    Some(FieldInfo::new(
+        col_name.to_string(),
         normalized_type,
-        column_method,
-        nullable: is_nullable,
-    })
+        is_nullable,
+        false,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -546,8 +545,7 @@ fn generate_for_table(
         .map_or(NormalizedType::I32, |c| c.col_type.clone());
 
     codegen::update_entity_file(&pascal, &fields, timestamps, primary_key.as_deref(), force)?;
-    // Always false: DB already owns the schema, so no timestamp columns are injected.
-    codegen::create_migration_file(plural, &pascal_plural, &fields, &pk_type, false)?;
+    codegen::create_migration_file(plural, &pascal_plural, &fields, false)?;
     codegen::create_feature_module(&singular, plural, &pascal, &fields, &pk_type, force)?;
 
     println!(
@@ -698,14 +696,20 @@ mod tests {
         let fi = normalized_to_field_info("name", &NormalizedType::String, false).unwrap();
         assert_eq!(fi.name, "name");
         assert_eq!(fi.normalized_type, NormalizedType::String);
-        assert_eq!(fi.column_method.0, ".string().not_null()");
+        assert_eq!(
+            fi.generate_column("Users"),
+            ".col(ColumnDef::new(Users::Name).string().not_null())"
+        );
     }
 
     #[test]
     fn test_normalized_to_field_info_nullable() {
         let fi = normalized_to_field_info("bio", &NormalizedType::Text, true).unwrap();
         assert_eq!(fi.normalized_type, NormalizedType::Text);
-        assert_eq!(fi.column_method.0, ".text()");
+        assert_eq!(
+            fi.generate_column("Profiles"),
+            ".col(ColumnDef::new(Profiles::Bio).text().null())"
+        );
     }
 
     #[test]
@@ -751,8 +755,11 @@ mod tests {
                 norm_type
             );
             assert_eq!(
-                fi.column_method,
-                ColumnMethod(format!("{}.not_null()", expected_col_base)),
+                fi.generate_column("Users"),
+                format!(
+                    ".col(ColumnDef::new(Users::X){}.not_null())",
+                    expected_col_base
+                ),
                 "column_method for {:?}",
                 norm_type
             );

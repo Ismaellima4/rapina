@@ -90,8 +90,120 @@ impl std::fmt::Display for NormalizedType {
 }
 
 impl NormalizedType {
-    pub(crate) fn schema_type_name(&self) -> String {
+    pub(crate) fn sea_orm_import_name(&self) -> Option<&'static str> {
         match self {
+            NormalizedType::DateTimeUtc => Some("DateTimeUtc"),
+            NormalizedType::DateTime => Some("DateTime"),
+            NormalizedType::Date => Some("Date"),
+            NormalizedType::Json => Some("Json"),
+            NormalizedType::Time => Some("Time"),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FieldInfo {
+    pub name: String,
+    pub ident: String,
+    pub normalized_type: NormalizedType,
+    _column_method: String,
+    pub nullable: bool,
+    pub is_primary_key: bool,
+}
+
+impl std::str::FromStr for FieldInfo {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (name, type_str) = value
+            .split_once(':')
+            .ok_or_else(|| format!("Invalid field format: '{}'. Expected 'name:type'", value))?;
+
+        ValidationContext::Field.validate(name)?;
+
+        let ident = codegen::to_pascal_case(name);
+        let is_primary_key = name == "id";
+        let normalized_type = type_str.parse::<NormalizedType>()?;
+        let nullable = false;
+
+        Ok(FieldInfo {
+            name: name.to_string(),
+            ident,
+            normalized_type,
+            _column_method: String::new(),
+            nullable,
+            is_primary_key,
+        })
+    }
+}
+
+impl FieldInfo {
+    #[cfg(feature = "import")]
+    pub fn new(
+        name: String,
+        normalized_type: NormalizedType,
+        nullable: bool,
+        is_primary_key: bool,
+    ) -> Self {
+        let ident = codegen::to_pascal_case(&name);
+        Self {
+            name,
+            ident,
+            normalized_type,
+            _column_method: String::new(),
+            nullable,
+            is_primary_key,
+        }
+    }
+
+    fn generate_column(&self, table_pascal_plural: &str) -> String {
+        let base = match self.normalized_type {
+            NormalizedType::String => ".string()",
+            NormalizedType::Text => ".text()",
+            NormalizedType::I32 => ".integer()",
+            NormalizedType::I64 => ".big_integer()",
+            NormalizedType::F32 => ".float()",
+            NormalizedType::F64 => ".double()",
+            NormalizedType::Bool => ".boolean().default(Expr::value(false))",
+            NormalizedType::Uuid => ".uuid()",
+            NormalizedType::DateTimeUtc => ".timestamp_with_time_zone()",
+            NormalizedType::DateTime => ".date_time()",
+            NormalizedType::Date => ".date()",
+            NormalizedType::Decimal => ".decimal()",
+            NormalizedType::Json => ".json()",
+            NormalizedType::Bytes => ".binary()",
+            NormalizedType::Time => ".time()",
+            #[cfg(feature = "import")]
+            NormalizedType::Unmappable(_) => "",
+        };
+
+        let mut method = base.to_string();
+
+        if self.nullable || base.is_empty() {
+            method.push_str(".null()");
+        } else {
+            method.push_str(".not_null()");
+        }
+
+        if self.is_primary_key {
+            method.push_str(".primary_key()");
+            if matches!(
+                self.normalized_type,
+                NormalizedType::I32 | NormalizedType::I64
+            ) {
+                method.push_str(".auto_increment()");
+            }
+        }
+
+        format!(
+            ".col(ColumnDef::new({}::{}){})",
+            table_pascal_plural, self.ident, method
+        )
+    }
+
+    pub(crate) fn schema_type_name(&self) -> String {
+        let s = match &self.normalized_type {
             NormalizedType::String => "String".to_string(),
             NormalizedType::Text => "Text".to_string(),
             NormalizedType::I32 => "i32".to_string(),
@@ -109,98 +221,13 @@ impl NormalizedType {
             NormalizedType::Time => "Time".to_string(),
             #[cfg(feature = "import")]
             NormalizedType::Unmappable(s) => s.clone(),
-        }
-    }
-
-    pub(crate) fn sea_orm_import_name(&self) -> Option<&'static str> {
-        match self {
-            NormalizedType::DateTimeUtc => Some("DateTimeUtc"),
-            NormalizedType::DateTime => Some("DateTime"),
-            NormalizedType::Date => Some("Date"),
-            NormalizedType::Json => Some("Json"),
-            NormalizedType::Time => Some("Time"),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ColumnMethod(String);
-
-impl std::fmt::Display for ColumnMethod {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl ColumnMethod {
-    fn not_null(&self) -> Self {
-        ColumnMethod(format!("{}.not_null()", self.0))
-    }
-
-    pub(crate) fn new(normalized_type: &NormalizedType, nullable: bool) -> Self {
-        let base = match normalized_type {
-            NormalizedType::String => ".string()",
-            NormalizedType::Text => ".text()",
-            NormalizedType::I32 => ".integer()",
-            NormalizedType::I64 => ".big_integer()",
-            NormalizedType::F32 => ".float()",
-            NormalizedType::F64 => ".double()",
-            NormalizedType::Bool => ".boolean()",
-            NormalizedType::Uuid => ".uuid()",
-            NormalizedType::DateTimeUtc => ".timestamp_with_time_zone()",
-            NormalizedType::DateTime => ".date_time()",
-            NormalizedType::Date => ".date()",
-            NormalizedType::Decimal => ".decimal()",
-            NormalizedType::Json => ".json()",
-            NormalizedType::Bytes => ".binary()",
-            NormalizedType::Time => ".time()",
-            #[cfg(feature = "import")]
-            NormalizedType::Unmappable(_) => "",
         };
 
-        let column_method = ColumnMethod(base.to_string());
-
-        if nullable || base.is_empty() {
-            return column_method;
+        if self.nullable {
+            format!("Option<{s}>")
+        } else {
+            s
         }
-
-        column_method.not_null()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct FieldInfo {
-    pub name: String,
-    pub normalized_type: NormalizedType,
-    pub column_method: ColumnMethod,
-    pub nullable: bool,
-}
-
-impl std::str::FromStr for FieldInfo {
-    type Err = String;
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = value.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "Invalid field format: '{}'. Expected 'name:type'",
-                value
-            ));
-        }
-
-        let name = parts[0].to_string();
-
-        ValidationContext::Field.validate(&name)?;
-
-        let normalized_type = parts[1].parse::<NormalizedType>()?;
-        let nullable = false;
-        let column_method = ColumnMethod::new(&normalized_type, nullable);
-        Ok(FieldInfo {
-            name,
-            normalized_type,
-            column_method,
-            nullable,
-        })
     }
 }
 
@@ -292,7 +319,7 @@ pub fn verify_rapina_project() -> Result<toml::Value, String> {
 mod tests {
     use crate::commands::ValidationContext;
 
-    use super::{ColumnMethod, FieldInfo, NormalizedType};
+    use super::{FieldInfo, NormalizedType};
 
     #[test]
     fn test_parse_field_valid() {
@@ -300,8 +327,8 @@ mod tests {
         assert_eq!(field.name, "name");
         assert_eq!(field.normalized_type, NormalizedType::String);
         assert_eq!(
-            field.column_method,
-            ColumnMethod(".string().not_null()".to_string())
+            field.generate_column("Post"),
+            ".col(ColumnDef::new(Post::Name).string().not_null())".to_string()
         );
         assert!(!field.nullable);
     }
@@ -334,10 +361,11 @@ mod tests {
     fn test_parse_field_valid_nullable() {
         let field: FieldInfo = "name:string".parse().unwrap();
         assert_eq!(field.name, "name");
+        assert_eq!(field.ident, "Name");
         assert_eq!(field.normalized_type, NormalizedType::String);
         assert_eq!(
-            field.column_method,
-            ColumnMethod(".string().not_null()".to_string())
+            field.generate_column("Post"),
+            ".col(ColumnDef::new(Post::Name).string().not_null())".to_string()
         );
         assert!(!field.nullable);
     }
@@ -509,45 +537,66 @@ mod tests {
 
     #[test]
     fn test_normalized_type_schema_name() {
-        assert_eq!(NormalizedType::String.schema_type_name(), "String");
-        assert_eq!(NormalizedType::Text.schema_type_name(), "Text");
-        assert_eq!(NormalizedType::I32.schema_type_name(), "i32");
-        assert_eq!(NormalizedType::I64.schema_type_name(), "i64");
-        assert_eq!(NormalizedType::DateTimeUtc.schema_type_name(), "DateTime");
-        assert_eq!(NormalizedType::DateTime.schema_type_name(), "NaiveDateTime");
-        assert_eq!(NormalizedType::Bytes.schema_type_name(), "Vec<u8>");
-        assert_eq!(NormalizedType::Time.schema_type_name(), "Time");
+        let filds = vec![
+            ("name:string".parse::<FieldInfo>().unwrap(), "String"),
+            ("age:i32".parse::<FieldInfo>().unwrap(), "i32"),
+            ("is_active:bool".parse::<FieldInfo>().unwrap(), "bool"),
+            ("date:date".parse::<FieldInfo>().unwrap(), "Date"),
+            ("time:time".parse::<FieldInfo>().unwrap(), "Time"),
+            (
+                "datetime:datetime".parse::<FieldInfo>().unwrap(),
+                "DateTime",
+            ),
+            (
+                "datetimeutc:datetimeutc".parse::<FieldInfo>().unwrap(),
+                "DateTime",
+            ),
+            ("decimal:decimal".parse::<FieldInfo>().unwrap(), "Decimal"),
+            ("json:json".parse::<FieldInfo>().unwrap(), "Json"),
+            ("bytes:bytes".parse::<FieldInfo>().unwrap(), "Vec<u8>"),
+        ];
+
+        for field in filds {
+            assert_eq!(field.0.schema_type_name(), field.1);
+        }
     }
 
     #[test]
     fn test_column_method_new() {
+        // String field
+        let field = "title:string".parse::<FieldInfo>().unwrap();
         assert_eq!(
-            ColumnMethod::new(&NormalizedType::String, false).to_string(),
-            ".string().not_null()"
+            field.generate_column("Post"),
+            ".col(ColumnDef::new(Post::Title).string().not_null())"
         );
+
+        // Primary key i32
+        let field = "id:i32".parse::<FieldInfo>().unwrap();
         assert_eq!(
-            ColumnMethod::new(&NormalizedType::String, true).to_string(),
-            ".string()"
+            field.generate_column("Posts"),
+            ".col(ColumnDef::new(Posts::Id).integer().not_null().primary_key().auto_increment())"
         );
+
+        // Primary key i64
+        let field = "id:i64".parse::<FieldInfo>().unwrap();
         assert_eq!(
-            ColumnMethod::new(&NormalizedType::I32, false).to_string(),
-            ".integer().not_null()"
+            field.generate_column("Users"),
+            ".col(ColumnDef::new(Users::Id).big_integer().not_null().primary_key().auto_increment())"
         );
+
+        // Uuid field
+        let field = "token:uuid".parse::<FieldInfo>().unwrap();
         assert_eq!(
-            ColumnMethod::new(&NormalizedType::Uuid, false).to_string(),
-            ".uuid().not_null()"
+            field.generate_column("Auth"),
+            ".col(ColumnDef::new(Auth::Token).uuid().not_null())"
         );
+
+        // Nullable field (manually set as from_str defaults to false)
+        let mut field = "bio:text".parse::<FieldInfo>().unwrap();
+        field.nullable = true;
         assert_eq!(
-            ColumnMethod::new(&NormalizedType::Bytes, false).to_string(),
-            ".binary().not_null()"
-        );
-        assert_eq!(
-            ColumnMethod::new(&NormalizedType::Time, false).to_string(),
-            ".time().not_null()"
-        );
-        assert_eq!(
-            ColumnMethod::new(&NormalizedType::DateTimeUtc, false).to_string(),
-            ".timestamp_with_time_zone().not_null()"
+            field.generate_column("Profile"),
+            ".col(ColumnDef::new(Profile::Bio).text().null())"
         );
     }
 
