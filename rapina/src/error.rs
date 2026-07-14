@@ -854,4 +854,38 @@ mod tests {
             "Internal Server Error"
         );
     }
+
+    #[tokio::test]
+    async fn json_response_returns_serialized_body() {
+        #[derive(Serialize)]
+        struct Msg {
+            msg: &'static str,
+        }
+
+        let res = json_response(http::StatusCode::OK, &Msg { msg: "hello" });
+
+        assert_eq!(res.status(), http::StatusCode::OK);
+        assert_eq!(
+            res.headers().get(http::header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&body[..], br#"{"msg":"hello"}"#);
+    }
+
+    #[tokio::test]
+    async fn json_response_falls_back_to_error_on_serialization_failure() {
+        let mut map = std::collections::HashMap::new();
+        map.insert(vec![1u8], 42);
+
+        let res = json_response(http::StatusCode::OK, &map);
+
+        assert_eq!(res.status(), http::StatusCode::INTERNAL_SERVER_ERROR);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let body_str = std::str::from_utf8(&body).unwrap();
+        assert!(
+            body_str.contains("Failed to serialize response"),
+            "expected error body, got: {body_str}"
+        );
+    }
 }
