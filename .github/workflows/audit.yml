@@ -19,6 +19,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - run: rm rust-toolchain.toml
       - uses: rustsec/audit-check@dd51754d4e59da7395a4cd9b593f0ff2d61a9b95  # v1.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
