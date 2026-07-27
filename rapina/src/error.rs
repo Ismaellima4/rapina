@@ -114,7 +114,7 @@ pub mod standard {
 
 /// RFC 7807 Problem Details error response format.
 pub mod rfc7807 {
-    use http::header::CONTENT_TYPE;
+    use http::{StatusCode, header::CONTENT_TYPE};
     use serde::Serialize;
 
     use crate::response::{APPLICATION_PROBLEM_JSON, IntoResponse};
@@ -165,6 +165,10 @@ pub mod rfc7807 {
             .join(" ")
     }
 
+    /// Allows returning a [`ProblemDetails`] directly from a handler.
+    ///
+    /// Sets `Content-Type: application/problem+json` and serializes
+    /// the body per RFC 7807.
     impl IntoResponse for ProblemDetails {
         fn into_response(self) -> http::Response<crate::response::BoxBody> {
             let body = match serde_json::to_vec(&self) {
@@ -172,7 +176,7 @@ pub mod rfc7807 {
                 Err(e) => {
                     tracing::error!("Failed to serialize RFC 7807 error response: {e}");
                     return http::Response::builder()
-                            .status(500u16)
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
                             .header(CONTENT_TYPE, APPLICATION_PROBLEM_JSON)
                             .body(crate::response::full(
                                 r#"{"type":"about:blank","title":"Internal Server Error","status":500,"detail":"Failed to serialize error response"}"#.as_bytes(),
@@ -487,18 +491,19 @@ impl IntoResponse for Error {
                     message: self.0.message.clone(),
                     details: self.0.details.clone(),
                 },
-                trace_id,
+                trace_id: trace_id.clone(),
             };
             let body = match serde_json::to_vec(&response) {
                 Ok(body) => body,
                 Err(e) => {
                     tracing::error!("Failed to serialize error response: {e}");
+                    let body = format!(
+                        r#"{{"error":{{"code":"INTERNAL_ERROR","message":"Failed to serialize error response"}},"trace_id":"{trace_id}"}}"#
+                    );
                     return http::Response::builder()
                         .status(500u16)
                         .header(CONTENT_TYPE, APPLICATION_JSON)
-                        .body(crate::response::full(
-                            r#"{"error":{"code":"INTERNAL_ERROR","message":"Failed to serialize error response"},"trace_id":"unknown"}"#.as_bytes(),
-                        ))
+                        .body(crate::response::full(body.into_bytes()))
                         .unwrap();
                 }
             };
