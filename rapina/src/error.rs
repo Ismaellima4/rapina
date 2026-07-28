@@ -29,7 +29,7 @@ use serde::Serialize;
 use std::fmt;
 
 use crate::response::{APPLICATION_JSON, BoxBody, IntoResponse};
-use http::header::CONTENT_TYPE;
+use http::{StatusCode, header::CONTENT_TYPE};
 
 /// Configuration for error response format.
 ///
@@ -501,7 +501,7 @@ impl IntoResponse for Error {
                         r#"{{"error":{{"code":"INTERNAL_ERROR","message":"Failed to serialize error response"}},"trace_id":"{trace_id}"}}"#
                     );
                     return http::Response::builder()
-                        .status(500u16)
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
                         .header(CONTENT_TYPE, APPLICATION_JSON)
                         .body(crate::response::full(body.into_bytes()))
                         .unwrap();
